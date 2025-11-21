@@ -18,7 +18,7 @@
         <draggable
           v-if="imageFiles.length > 0"
           v-model="imageFiles"
-          class="file-list file-list-grid"
+          class="file-list file-list-flex"
           :animation="200"
           ghost-class="ghost-item"
           chosen-class="chosen-item"
@@ -26,7 +26,13 @@
           <template #item="{ element: file, index }">
             <div class="file-item" :key="file">
               <div class="file-item-info">
-                <span class="file-item-name">{{ getImageFileName(file) }}</span>
+                <img 
+                  v-if="imageUrls[file]"
+                  :src="imageUrls[file]" 
+                  :alt="getImageFileName(file)"
+                  class="file-item-image"
+                />
+                <span v-else class="file-item-name">Đang tải ảnh...</span>
               </div>
               <button class="file-item-remove" @click="removeImageFile(index)" title="Xóa">✕</button>
             </div>
@@ -120,15 +126,17 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import draggable from 'vuedraggable'
 import { open } from '@tauri-apps/api/dialog'
+import { readBinaryFile } from '@tauri-apps/api/fs'
 import { useTauri } from '../composables/useTauri'
 
 const { callCommand } = useTauri()
 
 // Image files - store file paths
 const imageFiles = ref([])
+const imageUrls = ref({})
 
 // Configuration
 const imageDuration = ref(5)
@@ -146,6 +154,47 @@ const currentProcessId = ref(null)
 
 const getImageFileName = (filePath) => {
   return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
+}
+
+const getMimeType = (filePath) => {
+  const ext = filePath.toLowerCase().split('.').pop()
+  const mimeTypes = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'webp': 'image/webp'
+  }
+  return mimeTypes[ext] || 'image/jpeg'
+}
+
+const loadImageAsBlobUrl = async (filePath) => {
+  try {
+    // Check if already loaded
+    if (imageUrls.value[filePath]) {
+      return imageUrls.value[filePath]
+    }
+
+    // Read file as binary
+    const fileData = await readBinaryFile(filePath)
+    
+    // Get MIME type
+    const mimeType = getMimeType(filePath)
+    
+    // Create Blob from binary data
+    const blob = new Blob([fileData], { type: mimeType })
+    
+    // Create Blob URL
+    const blobUrl = URL.createObjectURL(blob)
+    
+    // Cache the blob URL
+    imageUrls.value[filePath] = blobUrl
+    
+    return blobUrl
+  } catch (error) {
+    console.error('Error loading image:', error, filePath)
+    return null
+  }
 }
 
 const selectImageFiles = async () => {
@@ -168,6 +217,8 @@ const selectImageFiles = async () => {
       for (const file of files) {
         if (!imageFiles.value.includes(file)) {
           imageFiles.value.push(file)
+          // Load image immediately
+          loadImageAsBlobUrl(file)
         }
       }
       
@@ -181,6 +232,13 @@ const selectImageFiles = async () => {
 }
 
 const removeImageFile = (index) => {
+  const fileToRemove = imageFiles.value[index]
+  // Cleanup blob URL để tránh memory leak
+  if (imageUrls.value[fileToRemove]) {
+    URL.revokeObjectURL(imageUrls.value[fileToRemove])
+    delete imageUrls.value[fileToRemove]
+  }
+  // Remove from array
   imageFiles.value.splice(index, 1)
 }
 
@@ -282,5 +340,12 @@ const stopVideoCreation = async () => {
     statusType.value = 'error'
   }
 }
+
+// Cleanup blob URLs khi component unmount để tránh memory leak
+onUnmounted(() => {
+  Object.values(imageUrls.value).forEach(url => {
+    if (url) URL.revokeObjectURL(url)
+  })
+})
 </script>
 
