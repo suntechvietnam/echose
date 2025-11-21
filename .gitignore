@@ -1,0 +1,47 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+*.log
+logs/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+*/*.DS_Store
+# Rust/Tauri build artifacts
+frontend/src-tauri/target/
+**/target/
+node_modules
+package-lock.json
+src-tauri/Cargo.lock
+# IDE - VSCode
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+frontend/dist
+dist/*
+# IDE - JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Temporary files
+*.swp
+*.swo
+*~
+*.tmp
+*.bak
+*.cache
+src-tauri/target/debug/*
+src-tauri/target/*
