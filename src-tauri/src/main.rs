@@ -28,6 +28,7 @@ fn main() {
             filesystem::get_file_size,
             filesystem::get_home_dir,
             filesystem::get_download_dir,
+            filesystem::save_temp_file,
             dialogs::select_files,
             dialogs::select_folder,
             youtube::download_youtube_video,

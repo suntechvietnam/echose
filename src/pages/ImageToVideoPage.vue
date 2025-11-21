@@ -5,14 +5,14 @@
     </div>
     <div class="page-body">
       <!-- Chọn danh sách ảnh -->
-      <div class="file-group">
-        <label class="form-label">🖼️ Chọn Danh Sách Ảnh</label>
-        <div class="file-selector">
-          <button class="btn-select-file" @click="selectImageFiles">
-            📁 Chọn Ảnh
-          </button>
-          <span class="file-count">{{ imageFiles.length }} ảnh đã chọn</span>
-        </div>
+        <div class="file-group">
+          <label class="form-label">🖼️ Chọn Danh Sách Ảnh</label>
+          <div class="file-selector">
+            <button class="btn-select-file" @click="selectImageFiles">
+              📁 Chọn Ảnh
+            </button>
+            <span class="file-count">{{ imageFiles.length }} ảnh đã chọn</span>
+          </div>
         
         <!-- Danh sách ảnh -->
         <draggable
@@ -122,13 +122,12 @@
 <script setup>
 import { ref } from 'vue'
 import draggable from 'vuedraggable'
+import { open } from '@tauri-apps/api/dialog'
 import { useTauri } from '../composables/useTauri'
-import { useFileSelection } from '../composables/useFileSelection'
 
 const { callCommand } = useTauri()
-const { selectFiles, selectFolder } = useFileSelection()
 
-// Image files
+// Image files - store file paths
 const imageFiles = ref([])
 
 // Configuration
@@ -151,14 +150,27 @@ const getImageFileName = (filePath) => {
 
 const selectImageFiles = async () => {
   try {
-    const selected = await selectFiles(['jpg', 'jpeg', 'png', 'gif', 'webp'], true)
-    if (selected && selected.length > 0) {
+    // Sử dụng Tauri Dialog API - cách tốt nhất
+    // Native dialog, hỗ trợ Command+A/Ctrl+A, có path trực tiếp
+    const selected = await open({
+      multiple: true,
+      filters: [{
+        name: 'Images',
+        extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp']
+      }]
+    })
+    
+    if (selected) {
+      // selected có thể là string (single) hoặc string[] (multiple)
+      const files = Array.isArray(selected) ? selected : [selected]
+      
       // Thêm các file mới vào danh sách (tránh trùng lặp)
-      for (const file of selected) {
+      for (const file of files) {
         if (!imageFiles.value.includes(file)) {
           imageFiles.value.push(file)
         }
       }
+      
       statusMessage.value = `✅ Đã chọn ${imageFiles.value.length} ảnh`
       statusType.value = 'success'
     }
@@ -174,10 +186,16 @@ const removeImageFile = (index) => {
 
 const selectOutputFolder = async () => {
   try {
-    const selected = await selectFolder()
+    // Sử dụng Tauri Dialog API - nhất quán với selectImageFiles
+    const selected = await open({
+      directory: true,
+      multiple: false
+    })
+    
     if (selected) {
-      outputFolder.value = selected
-      statusMessage.value = '✅ Đã chọn thư mục: ' + selected
+      const folderPath = Array.isArray(selected) ? selected[0] : selected
+      outputFolder.value = folderPath
+      statusMessage.value = '✅ Đã chọn thư mục: ' + folderPath
       statusType.value = 'success'
     }
   } catch (error) {

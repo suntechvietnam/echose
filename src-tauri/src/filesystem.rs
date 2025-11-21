@@ -81,3 +81,21 @@ pub async fn get_download_dir() -> Result<String, String> {
     }
 }
 
+#[tauri::command]
+pub async fn save_temp_file(file_name: String, file_data: Vec<u8>) -> Result<String, String> {
+    use std::fs;
+    use std::io::Write;
+    
+    let temp_dir = std::env::temp_dir();
+    let temp_file_path = temp_dir.join(&file_name);
+    
+    // Write file data to temp file
+    let mut file = fs::File::create(&temp_file_path)
+        .map_err(|e| format!("Lỗi khi tạo file tạm: {}", e))?;
+    
+    file.write_all(&file_data)
+        .map_err(|e| format!("Lỗi khi ghi file tạm: {}", e))?;
+    
+    Ok(temp_file_path.to_string_lossy().to_string())
+}
+
