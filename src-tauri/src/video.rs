@@ -191,14 +191,32 @@ pub async fn wait_for_video_creation(
             .map_err(|e| format!("Lỗi khi chờ process: {}", e))?;
         
         if output.status.success() {
-            // Nếu là process từ image_to_video, cleanup các file tạm
+            // Nếu là process từ image_to_video, cleanup các file tạm và trả về message với tên file
             if process_id.starts_with("images_video_") {
+                // Lấy output_file_path để trả về tên file
+                let video_file_path = crate::image_to_video::get_output_file_path(&process_id);
+                let video_file_name = video_file_path
+                    .as_ref()
+                    .and_then(|path| {
+                        std::path::Path::new(path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .map(|s| s.to_string())
+                    })
+                    .unwrap_or_else(|| "video.mp4".to_string());
+                
+                // Cleanup output_folder và output_file từ HashMap
+                crate::image_to_video::cleanup_output_folder_from_map(&process_id);
+                crate::image_to_video::cleanup_output_file_from_map(&process_id);
+                
                 if let Err(e) = cleanup_images_workdir(&process_id).await {
                     eprintln!("Cảnh báo: Không thể cleanup workdir: {}", e);
                 }
+                
+                return Ok(format!("Video đã được tạo thành công! {}", video_file_name));
             }
             
-            Ok("✅ Video đã được tạo thành công!".to_string())
+            Ok("Video đã được tạo thành công!".to_string())
         } else {
             let error_msg = String::from_utf8_lossy(&output.stderr);
             Err(format!("Lỗi khi tạo video: {}", error_msg))
