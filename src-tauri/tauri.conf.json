@@ -48,7 +48,12 @@
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.ytbflow.app"
+      "identifier": "com.ytbflow.app",
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": ""
+      }
     },
     "security": {
       "csp": null
