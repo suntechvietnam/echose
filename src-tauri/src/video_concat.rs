@@ -1,5 +1,9 @@
 use crate::video::find_ffmpeg;
 use crate::process::ProcessStore;
+use std::path::{PathBuf, Path};
+use std::fs;
+use std::io::Write;
+use uuid::Uuid;
 
 /**
  * Xác định resolution dựa trên video quality và aspect ratio
@@ -38,108 +42,295 @@ fn get_encoding_params(quality: &str) -> (&str, &str) {
 }
 
 /**
- * Build filter_complex cho xfade transitions giữa các video segments
- * 
- * Format ví dụ (với scale):
- * [0:v]scale=1920:1080,setsar=1[v0];
- * [1:v]scale=1920:1080,setsar=1[v1];
- * [2:v]scale=1920:1080,setsar=1[v2];
- * [3:v]scale=1920:1080,setsar=1[v3];
- * [v0][v1]xfade=transition=hrwind:duration=1:offset=4[x1];
- * [x1][v2]xfade=transition=hrwind:duration=1:offset=8[x2];
- * [x2][v3]xfade=transition=hrwind:duration=1:offset=12[video_out]
- * 
- * Format ví dụ (không scale - segments đã cùng resolution):
- * [0:v][1:v]xfade=transition=hrwind:duration=1:offset=4[x1];
- * [x1][2:v]xfade=transition=hrwind:duration=1:offset=8[x2];
- * [x2][3:v]xfade=transition=hrwind:duration=1:offset=12[video_out]
+ * Tạo file concat list cho ffmpeg concat demuxer
  */
-fn build_xfade_filter_complex(
-    segment_count: usize,
-    width: i32,
-    height: i32,
+fn create_concat_list_file(files: &[String], work_dir: &Path) -> Result<PathBuf, String> {
+    let concat_file = work_dir.join(format!("concat_list_{}.txt", Uuid::new_v4()));
+    let mut file = fs::File::create(&concat_file)
+        .map_err(|e| format!("Lỗi khi tạo file concat list: {}", e))?;
+    
+    for file_path in files {
+        // Escape single quotes và format cho concat demuxer
+        // Format: file 'path/to/file.mp4'
+        let escaped_path = file_path.replace('\'', "'\\''");
+        writeln!(file, "file '{}'", escaped_path)
+            .map_err(|e| format!("Lỗi khi ghi file concat list: {}", e))?;
+    }
+    
+    Ok(concat_file)
+}
+
+/**
+ * Concat video segments không có hiệu ứng bằng concat demuxer (nhanh hơn nhiều)
+ * Sử dụng file list .txt và copy stream, không re-encode
+ */
+async fn concat_without_effects_fast(
+    segment_files: Vec<String>,
+    output_path: &str,
+) -> Result<(), String> {
+    if segment_files.is_empty() {
+        return Err("Cần ít nhất một video segment".to_string());
+    }
+    
+    if segment_files.len() == 1 {
+        // Chỉ có 1 segment, copy trực tiếp
+        fs::copy(&segment_files[0], output_path)
+            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
+        return Ok(());
+    }
+    
+    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
+        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+    })?;
+    
+    // Tạo thư mục tạm để lưu file concat list
+    let output_path_buf = PathBuf::from(output_path);
+    let work_dir = output_path_buf.parent()
+        .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
+    
+    // Tạo file concat list
+    let concat_list_file = create_concat_list_file(&segment_files, work_dir)?;
+    
+    // Build ffmpeg command với concat demuxer
+    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    cmd.arg("-f")
+        .arg("concat")
+        .arg("-safe")
+        .arg("0") // Cho phép absolute paths
+        .arg("-i")
+        .arg(concat_list_file.to_string_lossy().as_ref())
+        .arg("-c:v")
+        .arg("copy") // Copy video stream - không re-encode, rất nhanh
+        .arg("-c:a")
+        .arg("copy") // Copy audio stream nếu có
+        .arg("-y")
+        .arg(output_path);
+    
+    // Chạy và đợi process hoàn thành
+    let output = cmd.output().await
+        .map_err(|e| format!("Lỗi khi chạy ffmpeg concat: {}", e))?;
+    
+    // Cleanup file concat list
+    let _ = fs::remove_file(&concat_list_file);
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        eprintln!("FFmpeg Error Details: {}", error_msg);
+        return Err(format!("Lỗi khi concat video (không hiệu ứng): {}", error_msg));
+    }
+    
+    Ok(())
+}
+
+/**
+ * Ghép 2 video với transition (Pipeline approach - tối ưu cho hiệu suất)
+ * Chỉ xử lý 2 video mỗi lần, phần lớn video được copy, chỉ encode phần transition
+ * 
+ * # Arguments
+ * * `video1_duration` - Duration của video đầu tiên (có thể là segment gốc hoặc output đã ghép)
+ */
+async fn merge_two_videos_with_transition(
+    video1_path: &str,
+    video2_path: &str,
+    output_path: &str,
     transition_type: &str,
     transition_duration: f64,
-    segment_duration: i32,
+    video_quality: &str,
+    video_aspect_ratio: &str,
+    video1_duration: f64, // Duration của video đầu tiên (có thể là segment hoặc output đã ghép)
+    video2_duration: f64, // Duration của video thứ hai (thường là segment_duration)
     force_scale: bool,
-) -> String {
-    let mut filter_parts = Vec::new();
+    is_intermediate: bool,
+) -> Result<(), String> {
+    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
+        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+    })?;
     
-    // Bước 1: Scale tất cả segments về cùng resolution (nếu cần)
-    if force_scale {
-        for i in 0..segment_count {
-            filter_parts.push(format!(
-                "[{}:v]scale={}:{},setsar=1[v{}];",
-                i, width, height, i
-            ));
-        }
-    }
-    
-    // Bước 2: Xfade transitions giữa các segments
-    // Offset được tính từ đầu video output
-    // Ví dụ: segment 5 giây, transition 1 giây
-    // - Transition 1 (giữa v0 và v1): offset = 5 - 1 = 4 giây
-    // - Transition 2 (giữa v1 và v2): offset = 10 - 1 = 9 giây (nhưng trong ví dụ là 8?)
-    // Thực ra offset là thời điểm bắt đầu transition tính từ đầu output video
-    // Với segment_duration = 5, transition_duration = 1:
-    // - Transition 1: bắt đầu ở giây thứ 4 (trong segment đầu tiên)
-    // - Transition 2: bắt đầu ở giây thứ 9 (trong segment thứ hai) = 5 + 4
-    // Nhưng ví dụ lại là 8, có thể là tính từ đầu segment thứ 2?
-    
-    if segment_count == 1 {
-        // Chỉ có 1 segment, không cần transition
-        // Nếu scale thì dùng [v0], nếu không scale thì dùng [0:v] trực tiếp
-        if force_scale {
-            filter_parts.push("[v0][video_out]".to_string());
-        } else {
-            // Không scale, dùng input trực tiếp (nhưng thực ra trường hợp này không bao giờ xảy ra
-            // vì helper function đã return sớm khi segment_count == 1)
-            filter_parts.push("[0:v][video_out]".to_string());
-        }
+    // Xác định resolution và encoding params
+    let (width, height) = if force_scale {
+        get_output_resolution(video_quality, video_aspect_ratio)
     } else {
-        // Transition đầu tiên
-        // Offset = segment_duration - transition_duration
-        let first_offset = segment_duration as f64 - transition_duration;
-        
-        // Xác định label cho input (không có dấu ngoặc vuông trong label, format string sẽ thêm)
-        let first_input_label = if force_scale { "v0" } else { "0:v" };
-        let second_input_label = if force_scale { "v1" } else { "1:v" };
-        
-        // Format string sẽ tự động thêm dấu ngoặc vuông
-        filter_parts.push(format!(
-            "[{}][{}]xfade=transition={}:duration={}:offset={}[x1];",
-            first_input_label, second_input_label, transition_type, transition_duration, first_offset
-        ));
-        
-        // Các transitions tiếp theo: [xN][vN+1]xfade -> [xN+1]
-        for i in 2..segment_count {
-            let current_offset = first_offset + (i - 1) as f64 * segment_duration as f64 - transition_duration;
-            let input_label = if i == 2 { "x1" } else { &format!("x{}", i - 1) };
-            let next_segment_label = if force_scale {
-                format!("v{}", i)
-            } else {
-                format!("{}:v", i)
-            };
-            let output_label = if i == segment_count - 1 {
-                "video_out" // Output cuối cùng
-            } else {
-                &format!("x{}", i)
-            };
-            
-            // Format string sẽ tự động thêm dấu ngoặc vuông cho next_segment_label
-            filter_parts.push(format!(
-                "[{}][{}]xfade=transition={}:duration={}:offset={}[{}];",
-                input_label, next_segment_label, transition_type, transition_duration, current_offset, output_label
-            ));
-        }
+        (0, 0)
+    };
+    
+    // Chọn preset: ultrafast cho file trung gian, quality-based cho file cuối cùng
+    let (preset, crf) = if is_intermediate {
+        ("ultrafast", "20") // Nhanh cho file trung gian
+    } else {
+        get_encoding_params(video_quality)
+    };
+    
+    // Build filter_complex cho 2 video với transition
+    // Format: [0:v][1:v]xfade=transition=type:duration=d:offset=offset[video_out]
+    // Offset = duration của video1 - transition_duration
+    let offset = video1_duration - transition_duration;
+    
+    let filter_complex = if force_scale {
+        format!(
+            "[0:v]scale={}:{},setsar=1[v0];[1:v]scale={}:{},setsar=1[v1];[v0][v1]xfade=transition={}:duration={}:offset={}[video_out]",
+            width, height, width, height, transition_type, transition_duration, offset
+        )
+    } else {
+        format!(
+            "[0:v][1:v]xfade=transition={}:duration={}:offset={}[video_out]",
+            transition_type, transition_duration, offset
+        )
+    };
+    
+    // Tính tổng duration: video1 + video2 - transition (vì có overlap)
+    let total_duration = video1_duration + video2_duration - transition_duration;
+    
+    // Build ffmpeg command
+    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    cmd.arg("-i")
+        .arg(video1_path)
+        .arg("-i")
+        .arg(video2_path)
+        .arg("-filter_complex")
+        .arg(&filter_complex)
+        .arg("-map")
+        .arg("[video_out]")
+        .arg("-t")
+        .arg(format!("{:.2}", total_duration))
+        .arg("-c:v")
+        .arg("libx264")
+        .arg("-preset")
+        .arg(preset)
+        .arg("-crf")
+        .arg(crf)
+        .arg("-pix_fmt")
+        .arg("yuv420p")
+        .arg("-g")
+        .arg("50")
+        .arg("-bf")
+        .arg("2")
+        .arg("-refs")
+        .arg("4")
+        .arg("-y")
+        .arg(output_path);
+    
+    // Chạy và đợi process hoàn thành
+    let output = cmd.output().await
+        .map_err(|e| format!("Lỗi khi ghép 2 video: {}", e))?;
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        eprintln!("FFmpeg Error Details: {}", error_msg);
+        return Err(format!("Lỗi khi ghép 2 video với transition: {}", error_msg));
     }
     
-    filter_parts.join(" ")
+    Ok(())
+}
+
+/**
+ * Concat video segments với transitions sử dụng Pipeline approach
+ * Ghép từng cặp video một: (v1+v2)→out1, (out1+v3)→out2, ... → final
+ * Tối ưu hiệu suất vì chỉ encode phần transition, phần còn lại copy
+ */
+async fn concat_with_pipeline_approach(
+    segment_files: Vec<String>,
+    video_effect_type: &str,
+    video_quality: &str,
+    video_aspect_ratio: &str,
+    segment_duration: i32,
+    transition_duration: f64,
+    output_path: &str,
+    force_scale: bool,
+) -> Result<(), String> {
+    if segment_files.is_empty() {
+        return Err("Cần ít nhất một video segment".to_string());
+    }
+    
+    if segment_files.len() == 1 {
+        // Chỉ có 1 segment, copy trực tiếp
+        fs::copy(&segment_files[0], output_path)
+            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
+        return Ok(());
+    }
+    
+    // Tạo thư mục tạm để lưu các file trung gian
+    let output_path_buf = PathBuf::from(output_path);
+    let work_dir = output_path_buf.parent()
+        .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
+    
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    
+    let pipeline_work_dir = work_dir.join(format!("pipeline_temp_{}", timestamp));
+    fs::create_dir_all(&pipeline_work_dir)
+        .map_err(|e| format!("Lỗi khi tạo pipeline work directory: {}", e))?;
+    
+    // Bước 1: Ghép video đầu tiên với video thứ 2
+    let current_output = pipeline_work_dir.join(format!("pipeline_000.mp4"));
+    let mut current_output_str = current_output.to_string_lossy().to_string();
+    
+    // Tính duration hiện tại của output (bắt đầu với 2 video)
+    let mut current_duration = segment_duration as f64 * 2.0 - transition_duration;
+    
+    println!("Pipeline: Ghép video 1 và 2...");
+    merge_two_videos_with_transition(
+        &segment_files[0],
+        &segment_files[1],
+        &current_output_str,
+        video_effect_type,
+        transition_duration,
+        video_quality,
+        video_aspect_ratio,
+        segment_duration as f64, // Duration của video đầu tiên
+        segment_duration as f64, // Duration của video thứ hai
+        force_scale,
+        true, // Là file trung gian
+    ).await.map_err(|e| format!("Lỗi khi ghép video 1-2: {}", e))?;
+    
+    // Bước 2: Ghép output hiện tại với các video tiếp theo
+    for (idx, next_video) in segment_files.iter().enumerate().skip(2) {
+        let next_output = pipeline_work_dir.join(format!("pipeline_{:03}.mp4", idx));
+        let next_output_str = next_output.to_string_lossy().to_string();
+        
+        println!("Pipeline: Ghép output ({} videos) với video {}...", idx + 1, idx + 2);
+        
+        merge_two_videos_with_transition(
+            &current_output_str,
+            next_video,
+            &next_output_str,
+            video_effect_type,
+            transition_duration,
+            video_quality,
+            video_aspect_ratio,
+            current_duration, // Duration của output hiện tại (đã ghép nhiều video)
+            segment_duration as f64, // Duration của video tiếp theo
+            force_scale,
+            idx < segment_files.len() - 2, // Chỉ file cuối cùng mới không phải intermediate
+        ).await.map_err(|e| format!("Lỗi khi ghép video {}: {}", idx + 1, e))?;
+        
+        // Cập nhật duration cho output mới
+        current_duration = current_duration + segment_duration as f64 - transition_duration;
+        
+        // Xóa file trung gian trước đó
+        let _ = fs::remove_file(&current_output_str);
+        
+        // Cập nhật current_output cho lần lặp tiếp theo
+        current_output_str = next_output_str;
+    }
+    
+    // Bước 3: Copy file cuối cùng vào output_path
+    fs::copy(&current_output_str, output_path)
+        .map_err(|e| format!("Lỗi khi copy file cuối cùng: {}", e))?;
+    
+    // Cleanup: Xóa file trung gian cuối cùng và thư mục
+    let _ = fs::remove_file(&current_output_str);
+    let _ = fs::remove_dir_all(&pipeline_work_dir);
+    
+    Ok(())
 }
 
 /**
  * Helper function để concat video segments với transitions
- * Có thể gọi từ các module khác
+ * Tự động chọn phương pháp tối ưu nhất:
+ * - Không hiệu ứng: Concat demuxer (copy stream - rất nhanh)
+ * - Có hiệu ứng: Pipeline approach (ghép từng cặp - tối ưu)
  * 
  * # Arguments
  * * `force_scale` - Nếu true, sẽ scale tất cả segments về cùng resolution. 
@@ -164,103 +355,25 @@ pub async fn concat_video_segments_with_transitions_helper(
         return Ok(());
     }
     
-    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
-    })?;
-    
-    // Xác định resolution và encoding params (chỉ cần nếu force_scale)
-    let (width, height) = if force_scale {
-        get_output_resolution(video_quality, video_aspect_ratio)
-    } else {
-        (0, 0) // Không dùng nếu không scale
-    };
-    let (preset, crf) = get_encoding_params(video_quality);
-    
-    // Xác định transition type
-    // Nếu "none" thì không dùng xfade, chỉ concat đơn giản
-    let transition_type = if video_effect_type == "none" {
-        "fade" // Dùng fade mặc định cho "none"
-    } else {
-        video_effect_type
-    };
-    
-    // Build filter_complex
-    let filter_complex = if video_effect_type == "none" {
-        // Concat đơn giản không có transition
-        let mut parts = Vec::new();
-        for i in 0..segment_files.len() {
-            parts.push(format!("[{}:v]", i));
-        }
-        format!("{}concat=n={}:v=1:a=0[video_out]", 
-            parts.join(""), segment_files.len())
-    } else {
-        // Concat với xfade transitions
-        build_xfade_filter_complex(
-            segment_files.len(),
-            width,
-            height,
-            transition_type,
-            transition_duration,
-            segment_duration,
-            force_scale,
-        )
-    };
-    
-    // Build ffmpeg command
-    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
-    
-    // Thêm tất cả input files
-    for segment_file in &segment_files {
-        cmd.arg("-i").arg(segment_file);
+    // === XỬ LÝ RIÊNG CHO TRƯỜNG HỢP KHÔNG CÓ HIỆU ỨNG ===
+    // Nếu không có hiệu ứng, dùng concat demuxer với file list để nhanh hơn nhiều
+    if video_effect_type == "none" {
+        return concat_without_effects_fast(segment_files, output_path).await;
     }
     
-    // Tính tổng duration của output video
-    // Với xfade transitions:
-    // - Segment đầu tiên: segment_duration
-    // - Các segments tiếp theo: mỗi segment thêm (segment_duration - transition_duration) vì có overlap
-    // Tổng duration = segment_duration + (segment_count - 1) * (segment_duration - transition_duration)
-    let total_duration = if video_effect_type == "none" {
-        // Không có transition, tổng duration = tổng của tất cả segments
-        segment_files.len() as f64 * segment_duration as f64
-    } else {
-        // Có transitions, tính với overlap
-        segment_duration as f64 + (segment_files.len() - 1) as f64 * (segment_duration as f64 - transition_duration)
-    };
-    
-    // Áp dụng filter_complex
-    cmd.arg("-filter_complex")
-        .arg(&filter_complex)
-        .arg("-map")
-        .arg("[video_out]")
-        .arg("-t")
-        .arg(format!("{:.2}", total_duration))  // Chỉ định tổng duration của output
-        .arg("-c:v")
-        .arg("libx264")
-        .arg("-preset")
-        .arg(preset)
-        .arg("-crf")
-        .arg(crf)
-        .arg("-pix_fmt")
-        .arg("yuv420p")
-        .arg("-g")
-        .arg("50")  // GOP size = 2x framerate
-        .arg("-bf")
-        .arg("2")  // B-frames
-        .arg("-refs")
-        .arg("4")  // Reference frames
-        .arg("-y")
-        .arg(output_path);
-    
-    // Chạy và đợi process hoàn thành
-    let output = cmd.output().await
-        .map_err(|e| format!("Lỗi khi chạy ffmpeg concat: {}", e))?;
-    
-    if !output.status.success() {
-        let error_msg = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Lỗi khi concat video: {}", error_msg));
-    }
-    
-    Ok(())
+    // === XỬ LÝ VỚI HIỆU ỨNG: DÙNG PIPELINE APPROACH ===
+    // Pipeline approach tối ưu hơn batch processing cho trường hợp có transition
+    // Vì chỉ encode phần transition, phần còn lại copy
+    return concat_with_pipeline_approach(
+        segment_files,
+        video_effect_type,
+        video_quality,
+        video_aspect_ratio,
+        segment_duration,
+        transition_duration,
+        output_path,
+        force_scale,
+    ).await;
 }
 
 /**
