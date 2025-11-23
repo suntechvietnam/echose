@@ -28,7 +28,7 @@
           </div>
 
           <div class="file-group image-selection-group">
-            <h3 class="form-label">🖼️ Danh sách ảnh</h3>
+            <h3 class="form-label">Danh sách ảnh</h3>
             <div class="file-selector">
               <button class="btn-select-file" @click="selectImageFiles">
                 📁 Chọn Ảnh
@@ -83,14 +83,29 @@
           <!-- Cấu hình video -->
           <div class="file-group">
             <div class="form-group">
-              <label class="form-label">⏱️ Thời gian của mỗi ảnh</label>
-              <select v-model="imageDuration" class="form-select">
-                <option v-for="duration in durationOptions" :key="duration" :value="duration">
-                  {{ duration }} giây
-                </option>
-              </select>
-            </div>
+              <div class="form-group image-settings-group">
+                <div class="image-settings-item">
+                  <label class="form-label">⏱️ Thời gian mỗi ảnh</label>
+                  <select v-model="imageDuration" class="form-select">
+                    <option v-for="duration in durationOptions" :key="duration" :value="duration">
+                      {{ duration }} giây
+                    </option>
+                  </select>
+                </div>
 
+                <div class="image-settings-item">
+                  <label class="form-label">✨ Hiệu ứng ảnh</label>
+                  <select v-model="imageEffectType" class="form-select">
+                    <option v-for="imageEffect in imageEffectOptions" :key="imageEffect.value" :value="imageEffect.value">
+                      {{ imageEffect.name }}
+                    </option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="file-group">
             <div class="form-group">
               <label class="form-label">📺 Chất lượng video</label>
               <select v-model="videoQuality" class="form-select">
@@ -101,17 +116,31 @@
               </select>
             </div>
 
-            <div class="form-group">
-              <label class="form-label">✨ Hiệu ứng</label>
-              <select v-model="effectType" class="form-select">
-                <option value="zoom-random">Zoom nhẹ random in/out</option>
-                <option value="slide-fade">Slide left + Fade</option>
-                <option value="zoom-ken-burns">Ken Burns (Zoom + Pan)</option>
-                <option value="fade-only">Fade đơn giản</option>
-                <option value="none">Không có hiệu ứng</option>
-              </select>
+            <div class="form-group video-effect-group">
+              <label class="form-label">✨ Hiệu ứng video</label>
+              <div class="effect-preview-grid">
+                <div 
+                  v-for="effect in videoEffectOptions" 
+                  :key="effect.value"
+                  :class="['effect-preview-item', { active: videoEffectType === effect.value }]"
+                  @click="videoEffectType = effect.value"
+                  :title="effect.name"
+                >
+                  <img 
+                    v-if="effect.preview"
+                    :src="effect.preview" 
+                    :alt="effect.name"
+                    class="effect-preview-image"
+                  />
+                  <div v-if="videoEffectType === effect.value" class="effect-check-icon">
+                    ✓
+                  </div>
+                </div>
+              </div>
             </div>
+          </div>
 
+          <div class="file-group">
             <div class="form-group">
               <label class="form-label">💾 Thư mục lưu video</label>
               <div class="input-group">
@@ -165,37 +194,6 @@
             </div>
             <div class="progress-text">{{ progress }}%</div>
           </div>
-
-          <!-- Lịch sử xuất video -->
-          <!-- <div class="file-group video-history-group">
-            <label class="form-label">📜 Lịch Sử Xuất Video</label>
-            <div class="video-history-list">
-              <div 
-                v-for="(history, index) in videoHistory" 
-                :key="index"
-                class="video-history-item"
-              >
-                <div class="video-history-info">
-                  <div class="video-history-name">{{ history.fileName }}</div>
-                  <div class="video-history-details">
-                    {{ history.imageCount }} ảnh • {{ history.quality }} • {{ formatDate(history.createdAt) }}
-                  </div>
-                </div>
-                <div class="video-history-actions">
-                  <button 
-                    class="btn-open-folder" 
-                    @click="openVideoFolder(history.outputPath)"
-                    title="Mở thư mục"
-                  >
-                    📁
-                  </button>
-                </div>
-              </div>
-              <div v-if="videoHistory.length === 0" class="video-history-empty">
-                Chưa có video nào được tạo
-              </div>
-            </div>
-          </div> -->
         </div>
       </div>
     </div>
@@ -221,7 +219,35 @@ const imageDuration = ref(6)
 const durationOptions = [5, 6, 7, 8, 10, 12, 15, 20, 30]
 const videoQuality = ref('fullhd')
 const videoAspectRatio = ref('16:9') // Default: 16:9 (Video dài)
-const effectType = ref('zoom-random')
+const videoEffectType = ref('none')
+const imageEffectType = ref('none')
+
+const imageEffectOptions = [
+  { name: 'Không có', value: 'none' },
+  { name: 'Zoom in', value: 'zoom-in' },
+  { name: 'Zoom out', value: 'zoom-out' },
+  { name: 'Fade in', value: 'fade-in' },
+  { name: 'Fade out', value: 'fade-out' },
+  { name: 'Pan', value: 'pan' },
+]
+
+const videoEffectOptions = [
+  { name: 'None', value: 'none', preview: '/assets/img/effects/none.png' },
+  { name: 'Circle Open', value: 'circleopen', preview: '/assets/img/effects/circleopen.gif' },
+  { name: 'Diagonal Bottom Right', value: 'diagbr', preview: '/assets/img/effects/diagbr.gif' },
+  { name: 'Diagonal Top Left', value: 'diagtl', preview: '/assets/img/effects/diagtl.gif' },
+  { name: 'Diagonal Top Right', value: 'diagtr', preview: '/assets/img/effects/diagtr.gif' },
+  { name: 'Dissolve', value: 'dissolve', preview: '/assets/img/effects/dissolve.gif' },
+  { name: 'Horizontal Left Slice', value: 'hlslice', preview: '/assets/img/effects/hlslice.gif' },
+  { name: 'Horizontal Left Wind', value: 'hlwind', preview: '/assets/img/effects/hlwind.gif' },
+  { name: 'Horizontal Right Slice', value: 'hrslice', preview: '/assets/img/effects/hrslice.gif' },
+  { name: 'Horizontal Right Wind', value: 'hrwind', preview: '/assets/img/effects/hrwind.gif' },
+  { name: 'Radial', value: 'radial', preview: '/assets/img/effects/radial.gif' },
+  { name: 'Vertical Down Slice', value: 'vdslice', preview: '/assets/img/effects/vdslice.gif' },
+  { name: 'Vertical Down Wind', value: 'vdwind', preview: '/assets/img/effects/vdwind.gif' },
+  { name: 'Vertical Up Slice', value: 'vuslice', preview: '/assets/img/effects/vuslice.gif' },
+  { name: 'Vertical Up Wind', value: 'vuwind', preview: '/assets/img/effects/vuwind.gif' },
+]
 
 // Output
 const outputFolder = ref('')
@@ -431,9 +457,10 @@ const createVideoFromImages = async () => {
     const processId = await callCommand('create_video_from_images', {
       imageFiles: imageFiles.value,
       imageDuration: imageDuration.value,
+      imageEffectType: imageEffectType.value,
       videoQuality: videoQuality.value,
       videoAspectRatio: videoAspectRatio.value,
-      effectType: effectType.value,
+      videoEffectType: videoEffectType.value,
       outputFolder: outputFolder.value.trim()
     })
     
@@ -514,18 +541,6 @@ const stopVideoCreation = async () => {
     isCreating.value = false
   } catch (error) {
     statusMessage.value = '❌Lỗi khi dừng: ' + error
-    statusType.value = 'error'
-  }
-}
-
-const openVideoFolder = async (filePath) => {
-  try {
-    // Extract folder path from file path
-    const lastSlash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
-    const folderPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : filePath
-    await callCommand('open_folder', { path: folderPath })
-  } catch (error) {
-    statusMessage.value = '❌ Lỗi khi mở thư mục: ' + error
     statusType.value = 'error'
   }
 }

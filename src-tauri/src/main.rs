@@ -9,6 +9,7 @@ mod image_to_video;
 mod models;
 mod process;
 mod video;
+mod video_concat;
 mod youtube;
 
 use process::ProcessStore;
@@ -45,6 +46,7 @@ fn main() {
             video::get_step2_merged_video_path,
             image_to_video::create_video_from_images,
             image_to_video::stop_image_video_creation,
+            video_concat::concat_video_segments_with_transitions,
             audio::create_audio_mix,
             audio::wait_for_audio_creation,
             audio::stop_audio_creation,
