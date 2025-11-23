@@ -80,21 +80,56 @@ jobs:
         env:
           CARGO_TERM_COLOR: always
 
+      - name: Debug - List all bundle directories
+        run: |
+          Write-Host "Checking bundle directory structure..."
+          $bundleDir = "src-tauri\target\release\bundle"
+          if (Test-Path $bundleDir) {
+            Write-Host "Bundle directory exists: $bundleDir"
+            Get-ChildItem -Path $bundleDir -Recurse | ForEach-Object {
+              Write-Host "  $($_.FullName)"
+            }
+          } else {
+            Write-Host "Bundle directory does not exist: $bundleDir"
+          }
+
       - name: List build artifacts
         run: |
-          Write-Host "MSI files:"
-          $msiFiles = Get-ChildItem -Path "src-tauri\target\release\bundle\msi" -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue
-          if ($msiFiles) {
-            $msiFiles | ForEach-Object { Write-Host $_.FullName }
+          Write-Host "=== Searching for MSI files ==="
+          $msiPath = "src-tauri\target\release\bundle\msi"
+          if (Test-Path $msiPath) {
+            $msiFiles = Get-ChildItem -Path $msiPath -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue
+            if ($msiFiles) {
+              Write-Host "Found MSI files:"
+              $msiFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
+            } else {
+              Write-Host "No MSI files found in $msiPath"
+            }
           } else {
-            Write-Host "No MSI files found"
+            Write-Host "MSI directory does not exist: $msiPath"
           }
-          Write-Host "NSIS files:"
-          $exeFiles = Get-ChildItem -Path "src-tauri\target\release\bundle\nsis" -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
-          if ($exeFiles) {
-            $exeFiles | ForEach-Object { Write-Host $_.FullName }
+          
+          Write-Host "`n=== Searching for NSIS files ==="
+          $nsisPath = "src-tauri\target\release\bundle\nsis"
+          if (Test-Path $nsisPath) {
+            $exeFiles = Get-ChildItem -Path $nsisPath -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
+            if ($exeFiles) {
+              Write-Host "Found NSIS files:"
+              $exeFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
+            } else {
+              Write-Host "No NSIS files found in $nsisPath"
+            }
           } else {
-            Write-Host "No NSIS files found"
+            Write-Host "NSIS directory does not exist: $nsisPath"
+          }
+          
+          Write-Host "`n=== Searching for any installer files ==="
+          $allFiles = Get-ChildItem -Path "src-tauri\target\release\bundle" -Include *.msi,*.exe -Recurse -ErrorAction SilentlyContinue
+          if ($allFiles) {
+            Write-Host "Found installer files:"
+            $allFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
+          } else {
+            Write-Host "No installer files found anywhere in bundle directory"
           }
 
       - name: Upload MSI installer
@@ -102,16 +137,32 @@ jobs:
         if: success()
         with:
           name: windows-installer-msi
-          path: src-tauri/target/release/bundle/msi/*.msi
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/**/*.msi
           retention-days: 30
           if-no-files-found: warn
+          continue-on-error: true
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         if: success()
         with:
           name: windows-installer-nsis
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/**/*setup.exe
           retention-days: 30
           if-no-files-found: warn
+          continue-on-error: true
+
+      - name: Upload all bundle files (fallback)
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: windows-installer-all
+          path: src-tauri/target/release/bundle/**
+          retention-days: 30
+          if-no-files-found: warn
+          continue-on-error: true
 

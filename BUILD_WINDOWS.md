@@ -22,14 +22,23 @@ Có 3 cách để build Windows installer cho ứng dụng YTBFlow:
    - Click **Run workflow** → Chọn branch → **Run workflow**
 
 3. **Tải installer**:
-   - Sau khi build xong, vào tab **Actions**
-   - Chọn run vừa chạy
-   - Tải file từ phần **Artifacts** → `windows-installer`
-   - Giải nén để lấy file `.msi` hoặc `.exe`
+   - Sau khi build xong (có dấu ✅ màu xanh), vào tab **Actions**
+   - Click vào run vừa chạy (workflow run)
+   - Scroll xuống phần **Artifacts** ở cuối trang
+   - Bạn sẽ thấy 2 artifacts:
+     - `windows-installer-msi` - chứa file `.msi` (MSI installer)
+     - `windows-installer-nsis` - chứa file `.exe` (NSIS installer)
+   - Click vào artifact bạn muốn tải → Click **Download** (file sẽ được tải về dạng `.zip`)
+   - Giải nén file `.zip` để lấy file cài đặt
 
 ### File installer sẽ có ở:
-- `src-tauri/target/release/bundle/msi/YTBFlow_0.1.0_x64_en-US.msi` (MSI installer)
-- `src-tauri/target/release/bundle/nsis/YTBFlow_0.1.0_x64-setup.exe` (NSIS installer)
+- **Trong GitHub Actions Artifacts:**
+  - `windows-installer-msi/YTBFlow_0.1.0_x64_en-US.msi` (MSI installer - khuyến nghị)
+  - `windows-installer-nsis/YTBFlow_0.1.0_x64-setup.exe` (NSIS installer)
+
+- **Trong workflow runner (chỉ để tham khảo):**
+  - `src-tauri/target/release/bundle/msi/YTBFlow_0.1.0_x64_en-US.msi`
+  - `src-tauri/target/release/bundle/nsis/YTBFlow_0.1.0_x64-setup.exe`
 
 ## Cách 2: Build trên máy Windows
 
