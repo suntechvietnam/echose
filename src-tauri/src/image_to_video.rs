@@ -1,12 +1,119 @@
 use crate::process::ProcessStore;
-use crate::video::find_ffmpeg;
-use crate::video_concat;
 use std::path::PathBuf;
 use std::fs;
+use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use uuid::Uuid;
+
+/// Tìm đường dẫn đến FFmpeg executable
+pub fn find_ffmpeg() -> Option<String> {
+    // Xác định tên file FFmpeg theo platform
+    #[cfg(target_os = "windows")]
+    let ffmpeg_name = "ffmpeg.exe";
+    #[cfg(not(target_os = "windows"))]
+    let ffmpeg_name = "ffmpeg";
+    
+    // Ưu tiên tìm trong app bundle trước (khi được bundle vào app)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(app_dir) = exe_path.parent() {
+            #[cfg(target_os = "macos")]
+            {
+                // Trên macOS: App.app/Contents/Resources/resources/ffmpeg hoặc App.app/Contents/Resources/ffmpeg
+                if let Some(contents_dir) = app_dir.parent() {
+                    let resources_dir = contents_dir.join("Resources");
+                    
+                    // Thử tìm trong resources/ffmpeg (khi được bundle)
+                    let bundled_ffmpeg1 = resources_dir.join("resources").join(ffmpeg_name);
+                    if bundled_ffmpeg1.exists() {
+                        return Some(bundled_ffmpeg1.to_string_lossy().to_string());
+                    }
+                    
+                    // Thử tìm trực tiếp trong Resources/ffmpeg
+                    let bundled_ffmpeg2 = resources_dir.join(ffmpeg_name);
+                    if bundled_ffmpeg2.exists() {
+                        return Some(bundled_ffmpeg2.to_string_lossy().to_string());
+                    }
+                }
+            }
+            
+            #[cfg(target_os = "windows")]
+            {
+                // Trên Windows: tìm trong cùng thư mục với .exe hoặc trong resources/
+                let local_ffmpeg = app_dir.join(ffmpeg_name);
+                if local_ffmpeg.exists() {
+                    return Some(local_ffmpeg.to_string_lossy().to_string());
+                }
+                
+                // Tìm trong thư mục resources/ (nếu có)
+                let resources_ffmpeg = app_dir.join("resources").join(ffmpeg_name);
+                if resources_ffmpeg.exists() {
+                    return Some(resources_ffmpeg.to_string_lossy().to_string());
+                }
+            }
+            
+            // Fallback: tìm trong cùng thư mục với executable (cho dev mode và Linux)
+            let local_ffmpeg = app_dir.join(ffmpeg_name);
+            if local_ffmpeg.exists() {
+                return Some(local_ffmpeg.to_string_lossy().to_string());
+            }
+        }
+    }
+    
+    // Tìm trong system paths
+    #[cfg(target_os = "windows")]
+    {
+        // Trên Windows, thử tìm ffmpeg.exe trong PATH
+        if let Ok(_) = std::process::Command::new("ffmpeg").arg("-version").output() {
+            return Some("ffmpeg".to_string());
+        }
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        let possible_paths = vec![
+            "/usr/local/bin/ffmpeg",
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+            "ffmpeg", // In PATH
+        ];
+        
+        for path in possible_paths {
+            if path == "ffmpeg" {
+                return Some(path.to_string());
+            }
+            if PathBuf::from(path).exists() {
+                if std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false) {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        let possible_paths = vec![
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+            "ffmpeg", // In PATH
+        ];
+        
+        for path in possible_paths {
+            if path == "ffmpeg" {
+                return Some(path.to_string());
+            }
+            if PathBuf::from(path).exists() {
+                if std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false) {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+    
+    None
+}
 
 /// Trait để định nghĩa cách build filter cho từng image effect
 trait ImageEffect {
@@ -372,9 +479,9 @@ pub async fn create_video_from_images(
         // Transition duration mặc định là 1 giây
         let transition_duration = 1.0;
         
-        // Gọi hàm concat helper từ video_concat module
+        // Concat các segments với transitions
         // force_scale = false vì các segments đã được tạo với cùng resolution rồi
-        video_concat::concat_video_segments_with_transitions_helper(
+        concat_video_segments_with_transitions_helper(
             video_segments.clone(),
             &video_effect_type,
             &video_quality,
@@ -413,12 +520,6 @@ pub async fn stop_image_video_creation(
         return Err("Process ID không hợp lệ cho image video creation".to_string());
     }
     
-    // Lấy output_folder từ HashMap
-    let output_folder = {
-        let folders = IMAGE_VIDEO_OUTPUT_FOLDERS.lock().unwrap();
-        folders.get(&process_id).cloned()
-    };
-    
     // Lấy và remove process từ ProcessStore để giải phóng memory
     let child_opt = {
         let mut procs = processes.lock().unwrap();
@@ -445,98 +546,284 @@ pub async fn stop_image_video_creation(
         files.remove(&process_id);
     }
     
-    // Cleanup work directory và các file đã tạo
-    cleanup_images_workdir(&process_id, output_folder.as_deref()).await?;
+    Ok("Đã dừng quá trình tạo video".to_string())
+}
+
+// ============================================================================
+// Video Concat Helper Functions
+// ============================================================================
+
+/**
+ * Tạo file concat list cho ffmpeg concat demuxer
+ */
+fn create_concat_list_file(files: &[String], work_dir: &PathBuf) -> Result<PathBuf, String> {
+    let concat_file = work_dir.join(format!("concat_list_{}.txt", Uuid::new_v4()));
+    let mut file = fs::File::create(&concat_file)
+        .map_err(|e| format!("Lỗi khi tạo file concat list: {}", e))?;
     
-    Ok("Đã dừng quá trình tạo video và xóa toàn bộ file tạm".to_string())
-}
-
-/// Cleanup output_folder từ HashMap khi process hoàn thành
-pub fn cleanup_output_folder_from_map(process_id: &str) {
-    let mut folders = IMAGE_VIDEO_OUTPUT_FOLDERS.lock().unwrap();
-    folders.remove(process_id);
-}
-
-/// Lấy output_file_path từ HashMap
-pub fn get_output_file_path(process_id: &str) -> Option<String> {
-    let files = IMAGE_VIDEO_OUTPUT_FILES.lock().unwrap();
-    files.get(process_id).cloned()
-}
-
-/// Cleanup output_file từ HashMap khi process hoàn thành
-pub fn cleanup_output_file_from_map(process_id: &str) {
-    let mut files = IMAGE_VIDEO_OUTPUT_FILES.lock().unwrap();
-    files.remove(process_id);
-}
-
-/// Cleanup work directory và các file tạm của process image video
-async fn cleanup_images_workdir(process_id: &str, output_folder: Option<&str>) -> Result<(), String> {
-    // Parse timestamp từ process_id: images_video_{timestamp}
-    let timestamp = process_id.strip_prefix("images_video_")
-        .ok_or_else(|| "Invalid process ID format".to_string())?;
-    
-    // Nếu có output_folder, tìm work_dir trực tiếp từ đó
-    if let Some(output_folder_path) = output_folder {
-        let output_path = PathBuf::from(output_folder_path);
-        if output_path.exists() && output_path.is_dir() {
-            let work_dir = output_path.join(format!("ytbflow_images_{}", timestamp));
-            if work_dir.exists() && work_dir.is_dir() {
-                // Xóa toàn bộ folder work_dir (bao gồm tất cả file và subfolder)
-                if let Err(e) = fs::remove_dir_all(&work_dir) {
-                    return Err(format!("Không thể xóa folder {}: {}", work_dir.display(), e));
-                }
-                return Ok(());
-            }
-        }
+    for file_path in files {
+        // Escape single quotes và format cho concat demuxer
+        // Format: file 'path/to/file.mp4'
+        let escaped_path = file_path.replace('\'', "'\\''");
+        writeln!(file, "file '{}'", escaped_path)
+            .map_err(|e| format!("Lỗi khi ghi file concat list: {}", e))?;
     }
     
-    // Fallback: Tìm work_dir trong các thư mục phổ biến
-    let possible_dirs = vec![
-        std::env::var("HOME").ok().map(|h| PathBuf::from(h).join("Downloads")),
-        std::env::var("HOME").ok().map(|h| PathBuf::from(h).join("Desktop")),
-        std::env::var("HOME").ok().map(|h| PathBuf::from(h)),
-    ];
-    
-    // Tìm work_dir trong các thư mục phổ biến
-    for maybe_dir in possible_dirs {
-        if let Some(base_dir) = maybe_dir {
-            let work_dir = base_dir.join(format!("ytbflow_images_{}", timestamp));
-            if work_dir.exists() && work_dir.is_dir() {
-                // Đọc cleanup_info.txt để lấy work_dir_path chính xác
-                let cleanup_info_file = work_dir.join("cleanup_info.txt");
-                if cleanup_info_file.exists() {
-                    if let Ok(content) = fs::read_to_string(&cleanup_info_file) {
-                        let parts: Vec<&str> = content.trim().split('|').collect();
-                        if parts.len() >= 2 {
-                            // output_folder là phần đầu tiên, work_dir_path là phần thứ hai
-                            let work_dir_path = parts[1];
-                            let correct_work_dir = PathBuf::from(work_dir_path);
-                            
-                            if correct_work_dir.exists() && correct_work_dir.is_dir() {
-                                // Xóa toàn bộ folder work_dir (bao gồm tất cả file và subfolder)
-                                if let Err(e) = fs::remove_dir_all(&correct_work_dir) {
-                                    return Err(format!("Không thể xóa folder {}: {}", correct_work_dir.display(), e));
-                                }
-                                
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-                
-                // Nếu không có cleanup_info.txt hoặc không đọc được, xóa toàn bộ folder hiện tại
-                if let Err(e) = fs::remove_dir_all(&work_dir) {
-                    return Err(format!("Không thể xóa folder {}: {}", work_dir.display(), e));
-                } else {
-                    return Ok(());
-                }
-            }
-        }
+    Ok(concat_file)
+}
+
+/**
+ * Concat video segments không có hiệu ứng bằng concat demuxer (nhanh hơn nhiều)
+ */
+async fn concat_without_effects_fast(
+    segment_files: Vec<String>,
+    output_path: &str,
+) -> Result<(), String> {
+    if segment_files.is_empty() {
+        return Err("Cần ít nhất một video segment".to_string());
     }
     
-    // Nếu không tìm thấy work_dir, có thể đã bị xóa hoặc không tồn tại
-    // Không coi đây là lỗi nghiêm trọng - chỉ log warning
-    eprintln!("Cảnh báo: Không tìm thấy work_dir cho process_id: {}", process_id);
+    if segment_files.len() == 1 {
+        // Chỉ có 1 segment, copy trực tiếp
+        fs::copy(&segment_files[0], output_path)
+            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
+        return Ok(());
+    }
+    
+    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
+        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+    })?;
+    
+    // Tạo file concat list
+    let output_path_buf = PathBuf::from(output_path);
+    let work_dir = output_path_buf.parent()
+        .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
+    
+    let concat_list_file = create_concat_list_file(&segment_files, &work_dir.to_path_buf())?;
+    
+    // Build ffmpeg command với concat demuxer
+    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    cmd.arg("-f")
+        .arg("concat")
+        .arg("-safe")
+        .arg("0") // Cho phép absolute paths
+        .arg("-i")
+        .arg(concat_list_file.to_string_lossy().as_ref())
+        .arg("-c:v")
+        .arg("copy") // Copy video stream - không re-encode, rất nhanh
+        .arg("-c:a")
+        .arg("copy") // Copy audio stream nếu có
+        .arg("-y")
+        .arg(output_path);
+    
+    // Chạy và đợi process hoàn thành
+    let output = cmd.output().await
+        .map_err(|e| format!("Lỗi khi chạy ffmpeg concat: {}", e))?;
+    
+    // Cleanup file concat list
+    let _ = fs::remove_file(&concat_list_file);
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        eprintln!("FFmpeg Error Details: {}", error_msg);
+        return Err(format!("Lỗi khi concat video (không hiệu ứng): {}", error_msg));
+    }
+    
     Ok(())
+}
+
+/**
+ * Ghép 2 video với transition
+ */
+async fn merge_two_videos_with_transition(
+    video1_path: &str,
+    video2_path: &str,
+    output_path: &str,
+    transition_type: &str,
+    transition_duration: f64,
+    video1_duration: f64,
+    video2_duration: f64,
+) -> Result<(), String> {
+    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
+        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+    })?;
+    
+    // Build filter_complex cho 2 video với transition
+    // Offset = duration của video1 - transition_duration
+    let offset = video1_duration - transition_duration;
+    
+    let filter_complex = format!(
+        "[0:v][1:v]xfade=transition={}:duration={}:offset={}[video_out]",
+        transition_type, transition_duration, offset
+    );
+    
+    // Tính tổng duration: video1 + video2 - transition (vì có overlap)
+    let total_duration = video1_duration + video2_duration - transition_duration;
+    
+    // Build ffmpeg command
+    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    cmd.arg("-i")
+        .arg(video1_path)
+        .arg("-i")
+        .arg(video2_path)
+        .arg("-filter_complex")
+        .arg(&filter_complex)
+        .arg("-map")
+        .arg("[video_out]")
+        .arg("-t")
+        .arg(format!("{:.2}", total_duration))
+        .arg("-c:v")
+        .arg("libx264")
+        .arg("-preset")
+        .arg("medium")
+        .arg("-crf")
+        .arg("20")
+        .arg("-pix_fmt")
+        .arg("yuv420p")
+        .arg("-g")
+        .arg("50")
+        .arg("-bf")
+        .arg("2")
+        .arg("-refs")
+        .arg("4")
+        .arg("-y")
+        .arg(output_path);
+    
+    // Chạy và đợi process hoàn thành
+    let output = cmd.output().await
+        .map_err(|e| format!("Lỗi khi ghép 2 video: {}", e))?;
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        eprintln!("FFmpeg Error Details: {}", error_msg);
+        return Err(format!("Lỗi khi ghép 2 video với transition: {}", error_msg));
+    }
+    
+    Ok(())
+}
+
+/**
+ * Concat video segments với transitions sử dụng Pipeline approach
+ */
+async fn concat_with_pipeline_approach(
+    segment_files: Vec<String>,
+    video_effect_type: &str,
+    segment_duration: i32,
+    transition_duration: f64,
+    output_path: &str,
+) -> Result<(), String> {
+    if segment_files.is_empty() {
+        return Err("Cần ít nhất một video segment".to_string());
+    }
+    
+    if segment_files.len() == 1 {
+        // Chỉ có 1 segment, copy trực tiếp
+        fs::copy(&segment_files[0], output_path)
+            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
+        return Ok(());
+    }
+    
+    // Tạo thư mục tạm để lưu các file trung gian
+    let output_path_buf = PathBuf::from(output_path);
+    let work_dir = output_path_buf.parent()
+        .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
+    
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    
+    let pipeline_work_dir = work_dir.join(format!("pipeline_temp_{}", timestamp));
+    fs::create_dir_all(&pipeline_work_dir)
+        .map_err(|e| format!("Lỗi khi tạo pipeline work directory: {}", e))?;
+    
+    // Bước 1: Ghép video đầu tiên với video thứ 2
+    let current_output = pipeline_work_dir.join(format!("pipeline_000.mp4"));
+    let mut current_output_str = current_output.to_string_lossy().to_string();
+    
+    // Tính duration hiện tại của output (bắt đầu với 2 video)
+    let mut current_duration = segment_duration as f64 * 2.0 - transition_duration;
+    
+    merge_two_videos_with_transition(
+        &segment_files[0],
+        &segment_files[1],
+        &current_output_str,
+        video_effect_type,
+        transition_duration,
+        segment_duration as f64,
+        segment_duration as f64,
+    ).await.map_err(|e| format!("Lỗi khi ghép video 1-2: {}", e))?;
+    
+    // Bước 2: Ghép output hiện tại với các video tiếp theo
+    for (idx, next_video) in segment_files.iter().enumerate().skip(2) {
+        let next_output = pipeline_work_dir.join(format!("pipeline_{:03}.mp4", idx));
+        let next_output_str = next_output.to_string_lossy().to_string();
+        
+        merge_two_videos_with_transition(
+            &current_output_str,
+            next_video,
+            &next_output_str,
+            video_effect_type,
+            transition_duration,
+            current_duration,
+            segment_duration as f64,
+        ).await.map_err(|e| format!("Lỗi khi ghép video {}: {}", idx + 1, e))?;
+        
+        // Cập nhật duration cho output mới
+        current_duration = current_duration + segment_duration as f64 - transition_duration;
+        
+        // Xóa file trung gian trước đó
+        let _ = fs::remove_file(&current_output_str);
+        
+        // Cập nhật current_output cho lần lặp tiếp theo
+        current_output_str = next_output_str;
+    }
+    
+    // Bước 3: Copy file cuối cùng vào output_path
+    fs::copy(&current_output_str, output_path)
+        .map_err(|e| format!("Lỗi khi copy file cuối cùng: {}", e))?;
+    
+    // Cleanup: Xóa file trung gian cuối cùng và thư mục
+    let _ = fs::remove_file(&current_output_str);
+    let _ = fs::remove_dir_all(&pipeline_work_dir);
+    
+    Ok(())
+}
+
+/**
+ * Helper function để concat video segments với transitions
+ */
+async fn concat_video_segments_with_transitions_helper(
+    segment_files: Vec<String>,
+    video_effect_type: &str,
+    _video_quality: &str,
+    _video_aspect_ratio: &str,
+    segment_duration: i32,
+    transition_duration: f64,
+    output_path: &str,
+    _force_scale: bool,
+) -> Result<(), String> {
+    if segment_files.is_empty() {
+        return Err("Cần ít nhất một video segment".to_string());
+    }
+    
+    if segment_files.len() == 1 {
+        // Chỉ có 1 segment, không cần concat
+        return Ok(());
+    }
+    
+    // Nếu không có hiệu ứng, dùng concat demuxer với file list để nhanh hơn nhiều
+    if video_effect_type == "none" {
+        return concat_without_effects_fast(segment_files, output_path).await;
+    }
+    
+    // Có hiệu ứng: dùng Pipeline approach
+    return concat_with_pipeline_approach(
+        segment_files,
+        video_effect_type,
+        segment_duration,
+        transition_duration,
+        output_path,
+    ).await;
 }
 

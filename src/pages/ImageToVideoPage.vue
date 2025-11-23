@@ -454,7 +454,10 @@ const createVideoFromImages = async () => {
   videoFolderPath.value = null
   
   try {
-    const processId = await callCommand('create_video_from_images', {
+    progress.value = 20
+    statusMessage.value = '⏳ Đang tạo video từ ảnh...'
+    
+    const result = await callCommand('create_video_from_images', {
       imageFiles: imageFiles.value,
       imageDuration: imageDuration.value,
       imageEffectType: imageEffectType.value,
@@ -464,58 +467,45 @@ const createVideoFromImages = async () => {
       outputFolder: outputFolder.value.trim()
     })
     
-    currentProcessId.value = processId
-    progress.value = 20
-    
-    const result = await callCommand('wait_for_video_creation', {
-      processId: processId
-    })
+    progress.value = 100
     
     if (result.includes('Lỗi')) {
       throw new Error(result)
     }
     
-    currentProcessId.value = null
-    progress.value = 100
-    
     // Parse result để lấy tên file và folder path
-    // Format: "Video đã được tạo thành công! filename.mp4"
+    // Format: "Video đã được tạo thành công! /path/to/filename.mp4"
     const videoFileNameMatch = result.match(/Video đã được tạo thành công!\s*(.+)/i)
     if (videoFileNameMatch) {
-      const videoFileName = videoFileNameMatch[1].trim()
-      statusMessage.value = `✅Video đã được tạo thành công! ${videoFileName}`
+      const videoFilePath = videoFileNameMatch[1].trim()
+      const videoFileName = videoFilePath.split('/').pop() || videoFilePath.split('\\').pop() || videoFilePath
+      statusMessage.value = `✅ Video đã được tạo thành công! ${videoFileName}`
       
       // Lưu folder path từ outputFolder để có thể mở folder
       if (outputFolder.value) {
         videoFolderPath.value = outputFolder.value
       }
-    } else {
-      statusMessage.value = '✅ ' + result
-    }
-    
-    // Extract video file path from result (fallback cho format cũ)
-    const videoPathMatch = result.match(/đã được lưu tại:\s*(.+)/i) || result.match(/saved at:\s*(.+)/i)
-    if (videoPathMatch) {
-      const videoPath = videoPathMatch[1].trim()
+      
       // Add to history
       videoHistory.value.unshift({
-        fileName: videoPath.split('/').pop() || videoPath.split('\\').pop() || 'video.mp4',
-        outputPath: videoPath,
+        fileName: videoFileName,
+        outputPath: videoFilePath,
         imageCount: imageFiles.value.length,
         quality: videoQuality.value,
         duration: imageDuration.value,
-        effect: effectType.value,
+        effect: imageEffectType.value,
         createdAt: new Date().toISOString()
       })
       // Keep only last 20 items
       if (videoHistory.value.length > 20) {
         videoHistory.value = videoHistory.value.slice(0, 20)
       }
+    } else {
+      statusMessage.value = '✅ ' + result
     }
     
     statusType.value = 'success'
   } catch (error) {
-    currentProcessId.value = null
     if (error.toString().includes('đã bị hủy') || error.toString().includes('cancelled')) {
       statusMessage.value = '⚠️ Quá trình tạo video đã bị hủy'
       statusType.value = 'info'
