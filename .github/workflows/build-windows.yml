@@ -76,9 +76,11 @@ jobs:
           }
 
       - name: Build Windows installer
+        id: build
         run: npm run tauri:build:windows
         env:
           CARGO_TERM_COLOR: always
+        continue-on-error: false
 
       - name: Debug - List all bundle directories
         run: |
@@ -132,37 +134,53 @@ jobs:
             Write-Host "No installer files found anywhere in bundle directory"
           }
 
+      - name: Prepare artifacts for upload
+        if: steps.build.outcome == 'success'
+        run: |
+          Write-Host "Preparing artifacts for upload..."
+          New-Item -ItemType Directory -Force -Path "artifacts" | Out-Null
+          
+          # Find and copy MSI files
+          $msiFiles = Get-ChildItem -Path "src-tauri\target\release\bundle" -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue
+          if ($msiFiles) {
+            Write-Host "Found $($msiFiles.Count) MSI file(s)"
+            New-Item -ItemType Directory -Force -Path "artifacts\msi" | Out-Null
+            $msiFiles | ForEach-Object { 
+              Write-Host "  Copying: $($_.FullName)"
+              Copy-Item $_.FullName -Destination "artifacts\msi\" -Force 
+            }
+          } else {
+            Write-Host "No MSI files found"
+          }
+          
+          # Find and copy NSIS/EXE files
+          $exeFiles = Get-ChildItem -Path "src-tauri\target\release\bundle" -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
+          if ($exeFiles) {
+            Write-Host "Found $($exeFiles.Count) EXE file(s)"
+            New-Item -ItemType Directory -Force -Path "artifacts\nsis" | Out-Null
+            $exeFiles | ForEach-Object { 
+              Write-Host "  Copying: $($_.FullName)"
+              Copy-Item $_.FullName -Destination "artifacts\nsis\" -Force 
+            }
+          } else {
+            Write-Host "No EXE files found"
+          }
+
       - name: Upload MSI installer
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: windows-installer-msi
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/**/*.msi
+          path: artifacts/msi/*.msi
           retention-days: 30
-          if-no-files-found: warn
-          continue-on-error: true
+          if-no-files-found: ignore
 
       - name: Upload NSIS installer
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: windows-installer-nsis
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/**/*setup.exe
+          path: artifacts/nsis/*.exe
           retention-days: 30
-          if-no-files-found: warn
-          continue-on-error: true
-
-      - name: Upload all bundle files (fallback)
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: windows-installer-all
-          path: src-tauri/target/release/bundle/**
-          retention-days: 30
-          if-no-files-found: warn
-          continue-on-error: true
+          if-no-files-found: ignore
 
