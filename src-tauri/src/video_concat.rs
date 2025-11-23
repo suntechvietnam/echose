@@ -1,7 +1,5 @@
 use crate::video::find_ffmpeg;
 use crate::process::ProcessStore;
-use std::path::PathBuf;
-use std::fs;
 
 /**
  * Xác định resolution dựa trên video quality và aspect ratio
@@ -216,11 +214,26 @@ pub async fn concat_video_segments_with_transitions_helper(
         cmd.arg("-i").arg(segment_file);
     }
     
+    // Tính tổng duration của output video
+    // Với xfade transitions:
+    // - Segment đầu tiên: segment_duration
+    // - Các segments tiếp theo: mỗi segment thêm (segment_duration - transition_duration) vì có overlap
+    // Tổng duration = segment_duration + (segment_count - 1) * (segment_duration - transition_duration)
+    let total_duration = if video_effect_type == "none" {
+        // Không có transition, tổng duration = tổng của tất cả segments
+        segment_files.len() as f64 * segment_duration as f64
+    } else {
+        // Có transitions, tính với overlap
+        segment_duration as f64 + (segment_files.len() - 1) as f64 * (segment_duration as f64 - transition_duration)
+    };
+    
     // Áp dụng filter_complex
     cmd.arg("-filter_complex")
         .arg(&filter_complex)
         .arg("-map")
         .arg("[video_out]")
+        .arg("-t")
+        .arg(format!("{:.2}", total_duration))  // Chỉ định tổng duration của output
         .arg("-c:v")
         .arg("libx264")
         .arg("-preset")
@@ -274,7 +287,7 @@ pub async fn concat_video_segments_with_transitions(
     transition_duration: f64,
     output_path: String,
     force_scale: Option<bool>,
-    processes: tauri::State<'_, ProcessStore>,
+    _processes: tauri::State<'_, ProcessStore>,  // Reserved for future use
 ) -> Result<String, String> {
     if segment_files.is_empty() {
         return Err("Cần ít nhất một video segment".to_string());
@@ -284,10 +297,6 @@ pub async fn concat_video_segments_with_transitions(
         // Chỉ có 1 segment, không cần concat, chỉ cần copy hoặc re-encode
         return Err("Cần ít nhất 2 video segments để concat với transitions".to_string());
     }
-    
-    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
-    })?;
     
     // Default force_scale = false (không scale nếu segments đã cùng resolution)
     let force_scale = force_scale.unwrap_or(false);

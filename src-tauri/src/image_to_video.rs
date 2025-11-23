@@ -3,7 +3,6 @@ use crate::video::find_ffmpeg;
 use crate::video_concat;
 use std::path::PathBuf;
 use std::fs;
-use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use std::collections::HashMap;
@@ -20,7 +19,7 @@ struct ImageEffectParams {
     width: i32,
     height: i32,
     total_frames: i32,
-    index: usize,
+    _index: usize,  // Reserved for future use
     video_quality: String,
 }
 
@@ -139,7 +138,7 @@ fn build_image_filter_string(
         width,
         height,
         total_frames,
-        index,
+        _index: index,
         video_quality: video_quality.to_string(),
     };
     effect.build_filter(&params)
@@ -158,9 +157,9 @@ async fn create_single_segment(
     image_file: &str,
     index: usize,
     image_duration: i32,
-    width: i32,
-    height: i32,
-    total_frames: i32,
+    _width: i32,  // Reserved for future use
+    _height: i32,  // Reserved for future use
+    _total_frames: i32,  // Reserved for future use
     filter: &str,  // Filter string đã được build sẵn
     preset: &str,
     crf: &str,
@@ -224,7 +223,7 @@ pub async fn create_video_from_images(
     image_effect_type: String,
     video_effect_type: String,
     output_folder: String,
-    processes: tauri::State<'_, ProcessStore>,
+    _processes: tauri::State<'_, ProcessStore>,  // Reserved for future use
 ) -> Result<String, String> {
     if image_files.is_empty() {
         return Err("Cần ít nhất một ảnh".to_string());
@@ -283,10 +282,8 @@ pub async fn create_video_from_images(
         _ => ("medium", "22"),           // Default Full HD
     };
     
-    /**
-     * Tạo video từng ảnh với hiệu ứng - PARALLEL PROCESSING
-     * Giới hạn số lượng concurrent tasks để tránh quá tải hệ thống
-     */
+    // Tạo video từng ảnh với hiệu ứng - PARALLEL PROCESSING
+    // Giới hạn số lượng concurrent tasks để tránh quá tải hệ thống
     let max_concurrent = match video_quality.as_str() {
         "hd" => 4,        // HD: có thể nhiều concurrent hơn
         "fullhd" => 3,     // Full HD: vừa phải
@@ -313,10 +310,8 @@ pub async fn create_video_from_images(
         let image_file_clone = image_file.clone();
         let permit = semaphore.clone();
         
-        /**
-         * Build filter riêng cho từng segment (trước khi vào async block để tránh Send issue)
-         * Mỗi segment có thể có index khác nhau nên cần build riêng
-         */
+        // Build filter riêng cho từng segment (trước khi vào async block để tránh Send issue)
+        // Mỗi segment có thể có index khác nhau nên cần build riêng
         let segment_filter = build_image_filter_string(
             &image_effect_type_clone,
             width,
@@ -363,10 +358,8 @@ pub async fn create_video_from_images(
         return Err("Không có segment nào được tạo".to_string());
     }
     
-    /**
-     * Concat các video segments với transitions
-     * Nếu chỉ có 1 segment thì không cần concat
-     */
+    // Concat các video segments với transitions
+    // Nếu chỉ có 1 segment thì không cần concat
     let final_video_path = if video_segments.len() == 1 {
         // Chỉ có 1 segment, không cần concat
         video_segments[0].clone()
@@ -406,9 +399,6 @@ pub async fn create_video_from_images(
         final_video_path_str
     };
     
-    // Tạo process_id để return
-    let process_id = format!("images_video_{}", timestamp);
-    
     Ok(format!("Video đã được tạo thành công! {}", final_video_path))
 }
 
@@ -435,10 +425,7 @@ pub async fn stop_image_video_creation(
         procs.remove(&process_id)
     };
     
-    /**
-     * Kill process đang chạy
-     * Kill the process
-     */
+    // Kill process đang chạy
     if let Some(mut child) = child_opt {
         if let Err(e) = child.kill().await {
             eprintln!("Cảnh báo: Không thể kill process: {}", e);
@@ -547,9 +534,8 @@ async fn cleanup_images_workdir(process_id: &str, output_folder: Option<&str>) -
         }
     }
     
-    /** Nếu không tìm thấy work_dir, có thể đã bị xóa hoặc không tồn tại
-     Không coi đây là lỗi nghiêm trọng - chỉ log warning
-    */     
+    // Nếu không tìm thấy work_dir, có thể đã bị xóa hoặc không tồn tại
+    // Không coi đây là lỗi nghiêm trọng - chỉ log warning
     eprintln!("Cảnh báo: Không tìm thấy work_dir cho process_id: {}", process_id);
     Ok(())
 }
