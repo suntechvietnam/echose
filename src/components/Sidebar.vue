@@ -59,7 +59,7 @@
             @click.prevent="handleClick('image-to-video')"
           >
             <span class="menu-icon">🖼️</span>
-            <span class="menu-text">Tạo Video Nguồn</span>
+            <span class="menu-text">Tạo video từ ảnh</span>
           </a>
         </li>
       </ul>

@@ -1,15 +1,34 @@
 <template>
   <div class="page-content">
     <div class="page-header">
-      <h2>Tạo Video Nguồn Từ Ảnh</h2>
+      <h2>Tạo video từ ảnh</h2>
     </div>
     <div class="page-body image-to-video-container">
       <!-- Layout 2 cột -->
       <div class="image-to-video-layout">
         <!-- Cột trái: Chọn và hiển thị danh sách ảnh -->
         <div class="image-to-video-left-column">
+          <!-- Video size -->
+          <div class="file-group video-size-group">
+            <h3 class="form-label">Chọn loại video</h3>
+            <div class="video-aspect-tabs">
+              <button 
+                :class="['aspect-tab', { active: videoAspectRatio === '16:9' }]"
+                @click="changeVideoAspectRatio('16:9')"
+              >
+                Video dài (16:9)
+              </button>
+              <button 
+                :class="['aspect-tab', { active: videoAspectRatio === '9:16' }]"
+                @click="changeVideoAspectRatio('9:16')"
+              >
+                Video ngắn (9:16)
+              </button>
+            </div>
+          </div>
+
           <div class="file-group image-selection-group">
-            <label class="form-label">🖼️ Chọn Danh Sách Ảnh</label>
+            <h3 class="form-label">🖼️ Danh sách ảnh</h3>
             <div class="file-selector">
               <button class="btn-select-file" @click="selectImageFiles">
                 📁 Chọn Ảnh
@@ -64,7 +83,7 @@
           <!-- Cấu hình video -->
           <div class="file-group">
             <div class="form-group">
-              <label class="form-label">⏱️ Khoảng Cách Giữa Các Ảnh (giây)</label>
+              <label class="form-label">⏱️ Thời gian của mỗi ảnh</label>
               <select v-model="imageDuration" class="form-select">
                 <option v-for="duration in durationOptions" :key="duration" :value="duration">
                   {{ duration }} giây
@@ -73,7 +92,7 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label">📺 Chất Lượng Video</label>
+              <label class="form-label">📺 Chất lượng video</label>
               <select v-model="videoQuality" class="form-select">
                 <option value="hd">720 (HD)</option>
                 <option value="fullhd">1080 (Full HD)</option>
@@ -83,7 +102,7 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label">✨ Hiệu Ứng</label>
+              <label class="form-label">✨ Hiệu ứng</label>
               <select v-model="effectType" class="form-select">
                 <option value="zoom-random">Zoom nhẹ random in/out</option>
                 <option value="slide-fade">Slide left + Fade</option>
@@ -94,7 +113,7 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label">💾 Thư Mục Lưu Video</label>
+              <label class="form-label">💾 Thư mục lưu video</label>
               <div class="input-group">
                 <input 
                   type="text" 
@@ -117,14 +136,14 @@
               @click="createVideoFromImages" 
               :disabled="isCreating"
             >
-              {{ isCreating ? '⏳ Đang tạo video...' : '🎬 Tạo Video' }}
+              {{ isCreating ? 'Đang tạo video...' : 'Tạo Video' }}
             </button>
             <button 
               v-if="isCreating"
               class="btn-stop-video" 
               @click="stopVideoCreation"
             >
-              ⏹️ Dừng
+              Huỷ tiến trình
             </button>
           </div>
 
@@ -184,7 +203,7 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
+import { ref, onUnmounted, watch } from 'vue'
 import draggable from 'vuedraggable'
 import { open } from '@tauri-apps/api/dialog'
 import { readBinaryFile } from '@tauri-apps/api/fs'
@@ -201,6 +220,7 @@ const imageUrls = ref({})
 const imageDuration = ref(6)
 const durationOptions = [5, 6, 7, 8, 10, 12, 15, 20, 30]
 const videoQuality = ref('fullhd')
+const videoAspectRatio = ref('16:9') // Default: 16:9 (Video dài)
 const effectType = ref('zoom-random')
 
 // Output
@@ -214,6 +234,16 @@ const videoFolderPath = ref(null)
 
 // Video history
 const videoHistory = ref([])
+
+const changeVideoAspectRatio = (aspectRatio) => {
+  videoAspectRatio.value = aspectRatio
+}
+
+watch(videoAspectRatio, (oldVal, newVal) => {
+  if (oldVal !== newVal) {
+    clearAllImages()
+  }
+})
 
 const getImageFileName = (filePath) => {
   return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
@@ -402,6 +432,7 @@ const createVideoFromImages = async () => {
       imageFiles: imageFiles.value,
       imageDuration: imageDuration.value,
       videoQuality: videoQuality.value,
+      videoAspectRatio: videoAspectRatio.value,
       effectType: effectType.value,
       outputFolder: outputFolder.value.trim()
     })

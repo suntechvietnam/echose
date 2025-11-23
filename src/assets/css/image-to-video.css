@@ -22,6 +22,49 @@
     overflow: hidden;
 }
 
+/* Video size group */
+.video-size-group {
+    margin-bottom: 16px;
+}
+
+/* Video aspect ratio tabs */
+.video-aspect-tabs {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.aspect-tab {
+    flex: 1;
+    padding: 8px 12px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.aspect-tab:hover {
+    border-color: #667eea;
+    color: #667eea;
+    background: #f8fafc;
+}
+
+.aspect-tab.active {
+    background: #667eea;
+    border-color: #667eea;
+    color: white;
+}
+
+.aspect-tab.active:hover {
+    background: #5568d3;
+    border-color: #5568d3;
+}
+
 .image-selection-group {
     flex: 1;
     display: flex;

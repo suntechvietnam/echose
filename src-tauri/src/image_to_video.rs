@@ -185,6 +185,7 @@ pub async fn create_video_from_images(
     image_files: Vec<String>,
     image_duration: i32,
     video_quality: String,
+    video_aspect_ratio: String,
     effect_type: String,
     output_folder: String,
     processes: tauri::State<'_, ProcessStore>,
@@ -218,13 +219,20 @@ pub async fn create_video_from_images(
     fs::create_dir_all(&work_dir)
         .map_err(|e| format!("Lỗi khi tạo work directory: {}", e))?;
     
-    // Xác định resolution dựa trên chất lượng
-    let (width, height) = match video_quality.as_str() {
+    // Xác định resolution dựa trên chất lượng và aspect ratio
+    let (base_width, base_height) = match video_quality.as_str() {
         "hd" => (1280, 720),      // HD 720p
         "fullhd" => (1920, 1080), // Full HD 1080p
         "2K" => (2048, 1080),     // 2K
         "4K" => (3840, 2160),     // 4K
         _ => (1920, 1080),        // Default Full HD
+    };
+    
+    // Áp dụng aspect ratio: 9:16 (dọc) hoặc 16:9 (ngang)
+    let (width, height) = match video_aspect_ratio.as_str() {
+        "9:16" => (base_height, base_width), // Swap cho video dọc (9:16)
+        "16:9" => (base_width, base_height),  // Giữ nguyên cho video ngang (16:9)
+        _ => (base_width, base_height),       // Default 16:9
     };
     
     // Tính số frame dựa trên duration (25 fps)
