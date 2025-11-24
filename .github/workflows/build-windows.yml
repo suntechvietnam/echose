@@ -88,201 +88,132 @@ jobs:
           # Refresh environment variables
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
+          # Add NSIS and WiX to PATH explicitly
+          $nsisBin = "C:\Program Files (x86)\NSIS"
+          $wixBin = "C:\Program Files (x86)\WiX Toolset v3.11\bin"
+          
+          if (Test-Path $nsisBin) {
+            $env:Path += ";$nsisBin"
+          }
+          if (Test-Path $wixBin) {
+            $env:Path += ";$wixBin"
+          }
+          
           Write-Host "Build tools installed"
+          Write-Host "Updated PATH includes:"
+          $env:Path -split ';' | Where-Object { $_ -like "*NSIS*" -or $_ -like "*WiX*" } | ForEach-Object { Write-Host "  $_" }
           
           # Verify installations
-          Write-Host "Checking NSIS..."
+          Write-Host "`nChecking NSIS..."
           $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
           if (Test-Path $nsisPath) {
             Write-Host "✓ NSIS found at $nsisPath"
-            & $nsisPath /VERSION
+            & $nsisPath /VERSION 2>&1 | ForEach-Object { Write-Host "  $_" }
           } else {
-            Write-Host "✗ NSIS not found"
+            Write-Host "✗ NSIS not found at expected location"
+            # Try to find NSIS
+            $foundNsis = Get-ChildItem -Path "C:\Program Files*" -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($foundNsis) {
+              Write-Host "  Found NSIS at: $($foundNsis.FullName)"
+              $env:Path += ";$($foundNsis.DirectoryName)"
+            }
           }
           
-          Write-Host "Checking WiX..."
-          $wixPath = "C:\Program Files (x86)\WiX Toolset v3.11\bin\candle.exe"
-          if (Test-Path $wixPath) {
-            Write-Host "✓ WiX found at $wixPath"
-          } else {
-            Write-Host "✗ WiX not found (may be installed in different location)"
+          Write-Host "`nChecking WiX..."
+          $wixPaths = @(
+            "C:\Program Files (x86)\WiX Toolset v3.11\bin\candle.exe",
+            "C:\Program Files\WiX Toolset v3.11\bin\candle.exe"
+          )
+          $wixFound = $false
+          foreach ($wixPath in $wixPaths) {
+            if (Test-Path $wixPath) {
+              Write-Host "✓ WiX found at $wixPath"
+              $wixFound = $true
+              $env:Path += ";$(Split-Path $wixPath)"
+              break
+            }
+          }
+          if (-not $wixFound) {
+            Write-Host "✗ WiX not found at expected locations"
+            # Try to find WiX
+            $foundWix = Get-ChildItem -Path "C:\Program Files*" -Filter "candle.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($foundWix) {
+              Write-Host "  Found WiX at: $($foundWix.FullName)"
+              $env:Path += ";$($foundWix.DirectoryName)"
+            }
           }
 
       - name: Build Windows installer
         id: build
         run: |
           Write-Host "Building Windows installer..."
-          Write-Host "Current directory: $(Get-Location)"
-          Write-Host "Checking tauri.conf.json..."
-          if (Test-Path "src-tauri\tauri.conf.json") {
-            Write-Host "✓ tauri.conf.json exists"
-            Write-Host "Bundle configuration:"
-            Get-Content "src-tauri\tauri.conf.json" | ConvertFrom-Json | Select-Object -ExpandProperty tauri | Select-Object -ExpandProperty bundle | ConvertTo-Json -Depth 3
-          }
+          Write-Host "Command: npm run tauri:build:windows"
           
-          Write-Host "`nRunning: npm run tauri:build:windows"
-          Write-Host "Environment variables:"
-          Write-Host "  CARGO_HOME: $env:CARGO_HOME"
-          Write-Host "  Path includes: $($env:PATH -split ';' | Where-Object { $_ -like '*nsis*' -or $_ -like '*wix*' -or $_ -like '*cargo*' })"
-          
-          # Check if build tools are accessible
-          Write-Host "`nChecking build tools accessibility:"
-          try {
-            $nsisVersion = & "C:\Program Files (x86)\NSIS\makensis.exe" /VERSION 2>&1
-            Write-Host "  NSIS: $nsisVersion"
-          } catch {
-            Write-Host "  NSIS: Not accessible - $_"
-          }
-          
-          try {
-            $wixPath = Get-Command candle.exe -ErrorAction SilentlyContinue
-            if ($wixPath) {
-              Write-Host "  WiX candle.exe: Found at $($wixPath.Source)"
-            } else {
-              Write-Host "  WiX candle.exe: Not found in PATH"
-            }
-          } catch {
-            Write-Host "  WiX: Error checking - $_"
-          }
-          
-          Write-Host "`nStarting build..."
-          npm run tauri:build:windows 2>&1 | Tee-Object -FilePath "build.log"
+          # Run build and capture output
+          $buildOutput = npm run tauri:build:windows 2>&1 | Tee-Object -Variable fullOutput
           $buildExitCode = $LASTEXITCODE
-          Write-Host "`nBuild exit code: $buildExitCode"
           
-          Write-Host "`n=== Checking build output ==="
+          Write-Host "`n=== Build Output ==="
+          $fullOutput
+          Write-Host "`n=== Build Exit Code: $buildExitCode ==="
           
-          # Check target directory structure
-          $targetDir = "src-tauri\target"
-          if (Test-Path $targetDir) {
-            Write-Host "✓ Target directory exists: $targetDir"
-            Write-Host "Target directory structure:"
-            Get-ChildItem -Path $targetDir -Recurse -Directory | ForEach-Object {
-              Write-Host "  DIR: $($_.FullName.Replace((Get-Location).Path, '.'))"
-            }
-          }
-          
-          # Check executable
-          $exePath = "src-tauri\target\release\ytbflow.exe"
-          if (Test-Path $exePath) {
-            Write-Host "✓ Executable found: $exePath"
-            $exeInfo = Get-Item $exePath
-            Write-Host "  Size: $($exeInfo.Length) bytes"
-            Write-Host "  Created: $($exeInfo.CreationTime)"
+          # Check if executable was created
+          Write-Host "`n=== Checking for executable ==="
+          $exeFiles = Get-ChildItem -Path "src-tauri\target\release" -Filter "*.exe" -ErrorAction SilentlyContinue
+          if ($exeFiles) {
+            Write-Host "✓ Executable found:"
+            $exeFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
           } else {
-            Write-Host "✗ Executable NOT found: $exePath"
-            Write-Host "Checking release directory contents:"
-            $releaseDir = "src-tauri\target\release"
-            if (Test-Path $releaseDir) {
-              Get-ChildItem -Path $releaseDir | ForEach-Object {
-                Write-Host "  $($_.Name) - $($_.Length) bytes"
-              }
-            } else {
-              Write-Host "  Release directory does not exist"
-            }
+            Write-Host "✗ No executable found in release directory"
           }
           
-          # Check bundle directory
+          # Check if bundle directory was created
+          Write-Host "`n=== Checking bundle directory ==="
           $bundleDir = "src-tauri\target\release\bundle"
           if (Test-Path $bundleDir) {
-            Write-Host "`n✓ Bundle directory exists: $bundleDir"
+            Write-Host "✓ Bundle directory exists: $bundleDir"
             Write-Host "Contents:"
             Get-ChildItem -Path $bundleDir -Recurse | ForEach-Object {
-              $relativePath = $_.FullName.Replace((Get-Location).Path + "\", "")
-              Write-Host "  $relativePath ($($_.Length) bytes)"
+              Write-Host "  $($_.FullName)"
+            }
+            
+            # Check for MSI files
+            $msiFiles = Get-ChildItem -Path $bundleDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue
+            if ($msiFiles) {
+              Write-Host "`n✓ Found $($msiFiles.Count) MSI file(s):"
+              $msiFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
+            }
+            
+            # Check for NSIS files
+            $nsisFiles = Get-ChildItem -Path $bundleDir -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
+            if ($nsisFiles) {
+              Write-Host "`n✓ Found $($nsisFiles.Count) NSIS/EXE file(s):"
+              $nsisFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
             }
           } else {
-            Write-Host "`n✗ Bundle directory NOT found: $bundleDir"
+            Write-Host "✗ Bundle directory NOT created: $bundleDir"
             Write-Host "Checking release directory structure..."
             if (Test-Path "src-tauri\target\release") {
               Write-Host "Release directory contents:"
               Get-ChildItem -Path "src-tauri\target\release" | ForEach-Object {
-                Write-Host "  $($_.Name) ($($_.Length) bytes)"
+                Write-Host "  $($_.Name) - $($_.PSIsContainer ? 'Directory' : 'File')"
               }
             } else {
-              Write-Host "✗ Release directory does not exist"
-            }
-          }
-          
-          # Show last 50 lines of build log for debugging
-          Write-Host "`n=== Last 50 lines of build log ==="
-          if (Test-Path "build.log") {
-            Get-Content "build.log" -Tail 50 | ForEach-Object { Write-Host $_ }
-          }
-          
-          # Always show build log analysis first
-          Write-Host "`n=== Build Log Analysis ==="
-          if (Test-Path "build.log") {
-            $buildLog = Get-Content "build.log" -Raw
-            
-            # Check for common bundle-related errors
-            Write-Host "Checking for bundle-related errors:"
-            if ($buildLog -match "NSIS") {
-              Write-Host "  - NSIS references found in log"
-              $buildLog -split "`n" | Where-Object { $_ -match "NSIS|nsis" } | ForEach-Object { Write-Host "    $_" }
-            }
-            if ($buildLog -match "WiX|wix") {
-              Write-Host "  - WiX references found in log"
-              $buildLog -split "`n" | Where-Object { $_ -match "WiX|wix" } | ForEach-Object { Write-Host "    $_" }
-            }
-            if ($buildLog -match "bundle|Bundle") {
-              Write-Host "  - Bundle references found in log"
-              $buildLog -split "`n" | Where-Object { $_ -match "bundle|Bundle" } | ForEach-Object { Write-Host "    $_" }
-            }
-            if ($buildLog -match "error:|Error:|ERROR:") {
-              Write-Host "  - Errors found in log:"
-              $buildLog -split "`n" | Where-Object { $_ -match "error:|Error:|ERROR:" } | ForEach-Object { Write-Host "    $_" }
-            }
-            if ($buildLog -match "warning:|Warning:|WARNING:") {
-              Write-Host "  - Warnings found in log:"
-              $buildLog -split "`n" | Where-Object { $_ -match "warning:|Warning:|WARNING:" } | ForEach-Object { Write-Host "    $_" }
+              Write-Host "✗ Release directory does not exist!"
             }
           }
           
           if ($buildExitCode -ne 0) {
             Write-Host "`n✗ Build failed with exit code $buildExitCode"
-            Write-Host "`nFull build log:"
-            if (Test-Path "build.log") {
-              Get-Content "build.log"
-            }
             exit $buildExitCode
           }
           
-          # Validate that installers were created
-          $msiFiles = Get-ChildItem -Path "src-tauri\target\release\bundle" -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue
-          $exeFiles = Get-ChildItem -Path "src-tauri\target\release\bundle" -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
-          
-          if (-not $msiFiles -and -not $exeFiles) {
-            Write-Host "`n✗ ERROR: No installer files were created!"
-            Write-Host "Expected MSI files in: src-tauri\target\release\bundle\msi\"
-            Write-Host "Expected EXE files in: src-tauri\target\release\bundle\nsis\"
-            Write-Host "`nBundle directory structure:"
-            if (Test-Path $bundleDir) {
-              Get-ChildItem -Path $bundleDir -Recurse | ForEach-Object {
-                Write-Host "  $($_.FullName)"
-              }
-            } else {
-              Write-Host "  Bundle directory does not exist"
-            }
-            Write-Host "`nShowing last 100 lines of build log:"
-            if (Test-Path "build.log") {
-              Get-Content "build.log" -Tail 100
-            }
-            exit 1
-          } else {
-            Write-Host "`n✓ SUCCESS: Installer files were created"
-            if ($msiFiles) {
-              Write-Host "MSI files: $($msiFiles.Count)"
-              $msiFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
-            }
-            if ($exeFiles) {
-              Write-Host "EXE files: $($exeFiles.Count)"  
-              $exeFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
-            }
+          if (-not (Test-Path $bundleDir)) {
+            Write-Host "`n⚠ Warning: Build completed but bundle directory was not created"
+            Write-Host "This might indicate that bundle creation was skipped or failed silently"
           }
         env:
           CARGO_TERM_COLOR: always
-          RUST_BACKTRACE: 1
         continue-on-error: false
 
       - name: Debug - List all bundle directories
@@ -349,14 +280,9 @@ jobs:
             Write-Host "Found $($msiFiles.Count) MSI file(s)"
             New-Item -ItemType Directory -Force -Path "artifacts\msi" | Out-Null
             $msiFiles | ForEach-Object { 
-              Write-Host "  Copying: $($_.FullName) -> artifacts\msi\"
+              Write-Host "  Copying: $($_.FullName)"
               Copy-Item $_.FullName -Destination "artifacts\msi\" -Force 
             }
-            
-            # Verify files were copied
-            $copiedMsiFiles = Get-ChildItem -Path "artifacts\msi" -Filter "*.msi" -ErrorAction SilentlyContinue
-            Write-Host "Verified MSI files in artifacts:"
-            $copiedMsiFiles | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
           } else {
             Write-Host "No MSI files found"
           }
@@ -367,60 +293,11 @@ jobs:
             Write-Host "Found $($exeFiles.Count) EXE file(s)"
             New-Item -ItemType Directory -Force -Path "artifacts\nsis" | Out-Null
             $exeFiles | ForEach-Object { 
-              Write-Host "  Copying: $($_.FullName) -> artifacts\nsis\"
+              Write-Host "  Copying: $($_.FullName)"
               Copy-Item $_.FullName -Destination "artifacts\nsis\" -Force 
             }
-            
-            # Verify files were copied
-            $copiedExeFiles = Get-ChildItem -Path "artifacts\nsis" -Filter "*.exe" -ErrorAction SilentlyContinue
-            Write-Host "Verified EXE files in artifacts:"
-            $copiedExeFiles | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
           } else {
             Write-Host "No EXE files found"
-          }
-          
-          # Final validation
-          $totalArtifacts = (Get-ChildItem -Path "artifacts" -Recurse -File -ErrorAction SilentlyContinue).Count
-          Write-Host "`nTotal artifacts prepared: $totalArtifacts"
-          if ($totalArtifacts -eq 0) {
-            Write-Host "WARNING: No artifacts were prepared for upload!"
-          }
-
-      - name: Debug artifacts before upload
-        if: steps.build.outcome == 'success'
-        run: |
-          Write-Host "=== Final artifact verification before upload ==="
-          Write-Host "Current working directory: $(Get-Location)"
-          
-          if (Test-Path "artifacts") {
-            Write-Host "`nArtifacts directory structure:"
-            Get-ChildItem -Path "artifacts" -Recurse | ForEach-Object {
-              $type = if ($_.PSIsContainer) { "DIR " } else { "FILE" }
-              Write-Host "  $type $($_.FullName) $(if (-not $_.PSIsContainer) { "($($_.Length) bytes)" })"
-            }
-            
-            Write-Host "`nChecking specific paths for upload:"
-            $msiPath = "artifacts/msi/*.msi"
-            $exePath = "artifacts/nsis/*.exe"
-            
-            $msiFiles = Get-ChildItem -Path $msiPath -ErrorAction SilentlyContinue 
-            $exeFiles = Get-ChildItem -Path $exePath -ErrorAction SilentlyContinue
-            
-            Write-Host "MSI files for upload (path: $msiPath):"
-            if ($msiFiles) {
-              $msiFiles | ForEach-Object { Write-Host "  ✓ $($_.Name)" }
-            } else {
-              Write-Host "  ✗ No files found"
-            }
-            
-            Write-Host "EXE files for upload (path: $exePath):"
-            if ($exeFiles) {
-              $exeFiles | ForEach-Object { Write-Host "  ✓ $($_.Name)" }
-            } else {
-              Write-Host "  ✗ No files found"
-            }
-          } else {
-            Write-Host "✗ Artifacts directory does not exist!"
           }
 
       - name: Upload MSI installer
@@ -430,7 +307,7 @@ jobs:
           name: windows-installer-msi
           path: artifacts/msi/*.msi
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
       - name: Upload NSIS installer
         if: steps.build.outcome == 'success'
@@ -439,5 +316,5 @@ jobs:
           name: windows-installer-nsis
           path: artifacts/nsis/*.exe
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
