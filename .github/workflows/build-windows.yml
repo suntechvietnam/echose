@@ -112,33 +112,71 @@ jobs:
         id: build
         run: |
           Write-Host "Building Windows installer..."
-          npm run tauri:build:windows
-          $buildExitCode = $LASTEXITCODE
-          Write-Host "Build exit code: $buildExitCode"
+          Write-Host "Current directory: $(Get-Location)"
+          Write-Host "Checking tauri.conf.json..."
+          if (Test-Path "src-tauri\tauri.conf.json") {
+            Write-Host "✓ tauri.conf.json exists"
+            Get-Content "src-tauri\tauri.conf.json" | Select-String -Pattern "bundle|targets" | ForEach-Object { Write-Host "  $_" }
+          }
           
-          # Check if bundle directory was created
+          Write-Host "`nRunning: npm run tauri:build:windows"
+          npm run tauri:build:windows 2>&1 | Tee-Object -FilePath "build.log"
+          $buildExitCode = $LASTEXITCODE
+          Write-Host "`nBuild exit code: $buildExitCode"
+          
+          Write-Host "`n=== Checking build output ==="
+          
+          # Check executable
+          $exePath = "src-tauri\target\release\ytbflow.exe"
+          if (Test-Path $exePath) {
+            Write-Host "✓ Executable found: $exePath"
+            $exeInfo = Get-Item $exePath
+            Write-Host "  Size: $($exeInfo.Length) bytes"
+          } else {
+            Write-Host "✗ Executable NOT found: $exePath"
+          }
+          
+          # Check bundle directory
           $bundleDir = "src-tauri\target\release\bundle"
           if (Test-Path $bundleDir) {
-            Write-Host "✓ Bundle directory created: $bundleDir"
+            Write-Host "`n✓ Bundle directory exists: $bundleDir"
+            Write-Host "Contents:"
             Get-ChildItem -Path $bundleDir -Recurse | ForEach-Object {
-              Write-Host "  $($_.FullName)"
+              $relativePath = $_.FullName.Replace((Get-Location).Path + "\", "")
+              Write-Host "  $relativePath ($($_.Length) bytes)"
             }
           } else {
-            Write-Host "✗ Bundle directory NOT created: $bundleDir"
-            Write-Host "Checking release directory..."
+            Write-Host "`n✗ Bundle directory NOT found: $bundleDir"
+            Write-Host "Checking release directory structure..."
             if (Test-Path "src-tauri\target\release") {
+              Write-Host "Release directory contents:"
               Get-ChildItem -Path "src-tauri\target\release" | ForEach-Object {
-                Write-Host "  $($_.FullName)"
+                Write-Host "  $($_.Name) ($($_.Length) bytes)"
               }
+            } else {
+              Write-Host "✗ Release directory does not exist"
             }
+          }
+          
+          # Show last 50 lines of build log for debugging
+          Write-Host "`n=== Last 50 lines of build log ==="
+          if (Test-Path "build.log") {
+            Get-Content "build.log" -Tail 50 | ForEach-Object { Write-Host $_ }
           }
           
           if ($buildExitCode -ne 0) {
-            Write-Host "Build failed with exit code $buildExitCode"
+            Write-Host "`n✗ Build failed with exit code $buildExitCode"
             exit $buildExitCode
+          }
+          
+          if (-not (Test-Path $bundleDir)) {
+            Write-Host "`n⚠ WARNING: Build completed but bundle directory was not created"
+            Write-Host "This might indicate that Tauri did not create installers"
+            Write-Host "Check the build log above for any warnings or errors"
           }
         env:
           CARGO_TERM_COLOR: always
+          RUST_BACKTRACE: 1
         continue-on-error: false
 
       - name: Debug - List all bundle directories
