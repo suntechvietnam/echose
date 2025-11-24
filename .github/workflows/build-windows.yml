@@ -35,6 +35,24 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Prepare resources directory
+        run: |
+          Write-Host "Ensuring resources directory exists..."
+          $resourcesDir = "src-tauri\resources"
+          if (-not (Test-Path $resourcesDir)) {
+            New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
+            Write-Host "Created resources directory: $resourcesDir"
+          } else {
+            Write-Host "Resources directory already exists: $resourcesDir"
+          }
+          
+          # Add a placeholder file to ensure directory is not empty
+          $placeholderFile = "$resourcesDir\.gitkeep"
+          if (-not (Test-Path $placeholderFile)) {
+            New-Item -ItemType File -Path $placeholderFile -Force | Out-Null
+            Write-Host "Created placeholder file: $placeholderFile"
+          }
+
       - name: Verify Windows icon exists
         run: |
           if (Test-Path "src-tauri\icons\icon.ico") {
@@ -62,8 +80,16 @@ jobs:
             Copy-Item $ffmpegExe.FullName -Destination "src-tauri\resources\ffmpeg.exe" -Force
             Copy-Item $ffprobeExe.FullName -Destination "src-tauri\resources\ffprobe.exe" -Force
             echo "FFmpeg downloaded successfully"
-            echo "FFmpeg path: src-tauri\resources\ffmpeg.exe"
+            echo "FFmpeg path: src-tauri\resources\ffmpeg.exe" 
             echo "FFprobe path: src-tauri\resources\ffprobe.exe"
+            
+            # Update tauri.conf.json to include resources now that they exist
+            Write-Host "Updating tauri.conf.json to include resources..."
+            $configPath = "src-tauri\tauri.conf.json"
+            $config = Get-Content $configPath | ConvertFrom-Json
+            $config.tauri.bundle.resources = @("resources/**")
+            $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
+            Write-Host "Updated tauri.conf.json with resources"
           } else {
             echo "Error: Could not find ffmpeg.exe or ffprobe.exe in downloaded archive"
             exit 1
