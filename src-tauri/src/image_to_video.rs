@@ -549,8 +549,8 @@ pub async fn stop_image_video_creation(
     
     // Kill process đang chạy
     if let Some(mut child) = child_opt {
-        if let Err(e) = child.kill().await {
-            eprintln!("Cảnh báo: Không thể kill process: {}", e);
+        if let Err(_e) = child.kill().await {
+            // Ignore kill errors
         }
         
         // Đợi process kết thúc để giải phóng tài nguyên
@@ -657,7 +657,6 @@ async fn concat_without_effects_fast(
     
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        eprintln!("FFmpeg Error Details: {}", error_msg);
         return Err(format!("Lỗi khi concat video (không hiệu ứng): {}", error_msg));
     }
     
@@ -738,7 +737,6 @@ async fn merge_two_videos_with_transition(
     
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        eprintln!("FFmpeg Error Details: {}", error_msg);
         return Err(format!("Lỗi khi ghép 2 video với transition: {}", error_msg));
     }
     
@@ -937,7 +935,6 @@ async fn merge_audio_files(
     
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        eprintln!("FFmpeg Audio Merge Error: {}", error_msg);
         return Err(format!("Lỗi khi merge audio: {}", error_msg));
     }
     
@@ -966,8 +963,6 @@ async fn merge_video_with_audio(
             "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
         }
     })?;
-    
-    eprintln!("🎵 merge_video_with_audio - FFmpeg path: {}", ffmpeg_path);
     
     // Build ffmpeg command để merge video với audio
     // Sử dụng -stream_loop -1 để loop video cho đến hết audio
