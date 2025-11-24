@@ -138,7 +138,12 @@
                     :src="effect.preview" 
                     :alt="effect.name"
                     class="effect-preview-image"
+                    @error="handleImageError"
+                    loading="lazy"
                   />
+                  <div v-else class="effect-preview-fallback">
+                    {{ effect.name.substring(0, 2) }}
+                  </div>
                   <div v-if="videoEffectType === effect.value" class="effect-check-icon">
                     ✓
                   </div>
@@ -216,6 +221,23 @@ import { useTauri } from '../composables/useTauri'
 import ImportAudioSection from '@/components/ImportAudioSection.vue'
 import '../assets/css/image-to-video.css'
 
+// Import effect images
+import noneImg from '../assets/img/effects/none.png'
+import circleopenImg from '../assets/img/effects/circleopen.gif'
+import diagbrImg from '../assets/img/effects/diagbr.gif'
+import diagtlImg from '../assets/img/effects/diagtl.gif'
+import diagtrImg from '../assets/img/effects/diagtr.gif'
+import dissolveImg from '../assets/img/effects/dissolve.gif'
+import hlsliceImg from '../assets/img/effects/hlslice.gif'
+import hlwindImg from '../assets/img/effects/hlwind.gif'
+import hrsliceImg from '../assets/img/effects/hrslice.gif'
+import hrwindImg from '../assets/img/effects/hrwind.gif'
+import radialImg from '../assets/img/effects/radial.gif'
+import vdsliceImg from '../assets/img/effects/vdslice.gif'
+import vdwindImg from '../assets/img/effects/vdwind.gif'
+import vusliceImg from '../assets/img/effects/vuslice.gif'
+import vuwindImg from '../assets/img/effects/vuwind.gif'
+
 const { callCommand } = useTauri()
 
 // Image files - store file paths
@@ -243,21 +265,21 @@ const imageEffectOptions = [
 ]
 
 const videoEffectOptions = [
-  { name: 'None', value: 'none', preview: '/assets/img/effects/none.png' },
-  { name: 'Circle Open', value: 'circleopen', preview: '/assets/img/effects/circleopen.gif' },
-  { name: 'Diagonal Bottom Right', value: 'diagbr', preview: '/assets/img/effects/diagbr.gif' },
-  { name: 'Diagonal Top Left', value: 'diagtl', preview: '/assets/img/effects/diagtl.gif' },
-  { name: 'Diagonal Top Right', value: 'diagtr', preview: '/assets/img/effects/diagtr.gif' },
-  { name: 'Dissolve', value: 'dissolve', preview: '/assets/img/effects/dissolve.gif' },
-  { name: 'Horizontal Left Slice', value: 'hlslice', preview: '/assets/img/effects/hlslice.gif' },
-  { name: 'Horizontal Left Wind', value: 'hlwind', preview: '/assets/img/effects/hlwind.gif' },
-  { name: 'Horizontal Right Slice', value: 'hrslice', preview: '/assets/img/effects/hrslice.gif' },
-  { name: 'Horizontal Right Wind', value: 'hrwind', preview: '/assets/img/effects/hrwind.gif' },
-  { name: 'Radial', value: 'radial', preview: '/assets/img/effects/radial.gif' },
-  { name: 'Vertical Down Slice', value: 'vdslice', preview: '/assets/img/effects/vdslice.gif' },
-  { name: 'Vertical Down Wind', value: 'vdwind', preview: '/assets/img/effects/vdwind.gif' },
-  { name: 'Vertical Up Slice', value: 'vuslice', preview: '/assets/img/effects/vuslice.gif' },
-  { name: 'Vertical Up Wind', value: 'vuwind', preview: '/assets/img/effects/vuwind.gif' },
+  { name: 'None', value: 'none', preview: noneImg },
+  { name: 'Circle Open', value: 'circleopen', preview: circleopenImg },
+  { name: 'Diagonal Bottom Right', value: 'diagbr', preview: diagbrImg },
+  { name: 'Diagonal Top Left', value: 'diagtl', preview: diagtlImg },
+  { name: 'Diagonal Top Right', value: 'diagtr', preview: diagtrImg },
+  { name: 'Dissolve', value: 'dissolve', preview: dissolveImg },
+  { name: 'Horizontal Left Slice', value: 'hlslice', preview: hlsliceImg },
+  { name: 'Horizontal Left Wind', value: 'hlwind', preview: hlwindImg },
+  { name: 'Horizontal Right Slice', value: 'hrslice', preview: hrsliceImg },
+  { name: 'Horizontal Right Wind', value: 'hrwind', preview: hrwindImg },
+  { name: 'Radial', value: 'radial', preview: radialImg },
+  { name: 'Vertical Down Slice', value: 'vdslice', preview: vdsliceImg },
+  { name: 'Vertical Down Wind', value: 'vdwind', preview: vdwindImg },
+  { name: 'Vertical Up Slice', value: 'vuslice', preview: vusliceImg },
+  { name: 'Vertical Up Wind', value: 'vuwind', preview: vuwindImg },
 ]
 
 // Output
@@ -571,6 +593,13 @@ const handleAudioSelected = (files) => {
 const handleAudioCleared = () => {
   statusMessage.value = '✅ Đã xóa tất cả file nhạc'
   statusType.value = 'success'
+}
+
+const handleImageError = (event) => {
+  // Handle error when effect preview image fails to load
+  console.warn('Failed to load effect preview image:', event.target.src)
+  // Optionally hide the image or show a placeholder
+  event.target.style.display = 'none'
 }
 
 // Cleanup blob URLs khi component unmount để tránh memory leak
