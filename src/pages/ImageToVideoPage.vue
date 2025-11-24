@@ -76,6 +76,13 @@
               </template>
             </draggable>
           </div>
+
+          <!-- Audio Selection Section -->
+          <ImportAudioSection 
+            @update:audioFiles="handleAudioFilesUpdate"
+            @audio-selected="handleAudioSelected"
+            @audio-cleared="handleAudioCleared"
+          />
         </div>
 
         <!-- Cột phải: Options và controls -->
@@ -206,6 +213,7 @@ import draggable from 'vuedraggable'
 import { open } from '@tauri-apps/api/dialog'
 import { readBinaryFile } from '@tauri-apps/api/fs'
 import { useTauri } from '../composables/useTauri'
+import ImportAudioSection from '@/components/ImportAudioSection.vue'
 import '../assets/css/image-to-video.css'
 
 const { callCommand } = useTauri()
@@ -213,6 +221,9 @@ const { callCommand } = useTauri()
 // Image files - store file paths
 const imageFiles = ref([])
 const imageUrls = ref({})
+
+// Audio files - store file paths
+const audioFiles = ref([])
 
 // Configuration
 const imageDuration = ref(6)
@@ -464,6 +475,7 @@ const createVideoFromImages = async () => {
       videoQuality: videoQuality.value,
       videoAspectRatio: videoAspectRatio.value,
       videoEffectType: videoEffectType.value,
+      audioFiles: audioFiles.value,
       outputFolder: outputFolder.value.trim()
     })
     
@@ -544,6 +556,21 @@ const openVideoFolderFromPath = async () => {
     statusMessage.value = '❌ Lỗi khi mở thư mục: ' + error
     statusType.value = 'error'
   }
+}
+
+// Audio handlers
+const handleAudioFilesUpdate = (files) => {
+  audioFiles.value = files
+}
+
+const handleAudioSelected = (files) => {
+  statusMessage.value = `✅ Đã chọn ${files.length} file nhạc`
+  statusType.value = 'success'
+}
+
+const handleAudioCleared = () => {
+  statusMessage.value = '✅ Đã xóa tất cả file nhạc'
+  statusType.value = 'success'
 }
 
 // Cleanup blob URLs khi component unmount để tránh memory leak
