@@ -57,7 +57,8 @@
         "icons/icon.ico"
       ],
       "resources": [
-        "resources/*"
+        "resources/window/*",
+        "resources/mac/*"
       ]
     },
     "security": {

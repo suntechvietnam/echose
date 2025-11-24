@@ -42,5 +42,9 @@ uuid = { version = "1.0", features = ["v4"] }
 # This feature is used for production builds or when `devPath` points to the filesystem
 custom-protocol = ["tauri/custom-protocol"]
 
+# Bundle configuration to include FFmpeg in installer
+[package.metadata.tauri.bundle]
+resources = ["resources/**"]
+
 
 

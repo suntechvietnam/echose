@@ -13,18 +13,22 @@ pub fn find_ffmpeg() -> Option<String> {
             if let Some(contents_dir) = app_dir.parent() {
                 let resources_dir = contents_dir.join("Resources");
                 
-                // Thử tìm trong resources/ffmpeg (khi được bundle)
-                let bundled_ffmpeg1 = resources_dir.join("resources").join("ffmpeg");
+                // Thử tìm trong resources/window/ffmpeg (bundle location)
+                let bundled_ffmpeg1 = resources_dir.join("resources").join("window").join("ffmpeg");
                 if bundled_ffmpeg1.exists() {
-                    // Không cần canonicalize, dùng đường dẫn trực tiếp
                     return Some(bundled_ffmpeg1.to_string_lossy().to_string());
                 }
                 
-                // Thử tìm trực tiếp trong Resources/ffmpeg
-                let bundled_ffmpeg2 = resources_dir.join("ffmpeg");
+                // Fallback: thử tìm trong resources/ffmpeg 
+                let bundled_ffmpeg2 = resources_dir.join("resources").join("ffmpeg");
                 if bundled_ffmpeg2.exists() {
-                    // Không cần canonicalize, dùng đường dẫn trực tiếp
                     return Some(bundled_ffmpeg2.to_string_lossy().to_string());
+                }
+                
+                // Fallback: thử tìm trực tiếp trong Resources/ffmpeg
+                let bundled_ffmpeg3 = resources_dir.join("ffmpeg");
+                if bundled_ffmpeg3.exists() {
+                    return Some(bundled_ffmpeg3.to_string_lossy().to_string());
                 }
             }
             

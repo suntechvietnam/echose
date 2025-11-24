@@ -72,10 +72,10 @@ jobs:
 
       - name: Prepare FFmpeg for Windows
         run: |
-          Write-Host "Preparing FFmpeg for Windows build..."
+          Write-Host "Auto-downloading FFmpeg for Windows build..."
           
-          # Use npm script to prepare ffmpeg files
-          npm run prepare:ffmpeg
+          # Use auto-download script (detects Windows automatically)
+          npm run auto-download:ffmpeg
           
           # Verify files were created
           $resourcesDir = "src-tauri\resources"
@@ -96,15 +96,43 @@ jobs:
           if (-not $allExist) {
             Write-Host "`n⚠ Some FFmpeg files missing, attempting download fallback..."
             
-            # Fallback: Download FFmpeg if prepare script failed
-            $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+            # Download official FFmpeg Windows essentials (static build, no dependencies)
+            Write-Host "Downloading FFmpeg Windows essentials (static build)..."
+            $ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
             $tempDir = "$env:TEMP\ffmpeg-download"
             New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-            Invoke-WebRequest -Uri $ffmpegUrl -OutFile "$tempDir\ffmpeg.zip" -UseBasicParsing
-            Expand-Archive -Path "$tempDir\ffmpeg.zip" -DestinationPath "$tempDir" -Force
             
-            $ffmpegExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-            $ffprobeExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+            try {
+              Invoke-WebRequest -Uri $ffmpegUrl -OutFile "$tempDir\ffmpeg.zip" -UseBasicParsing -ErrorAction Stop
+              Write-Host "✓ Downloaded FFmpeg essentials"
+              
+              Expand-Archive -Path "$tempDir\ffmpeg.zip" -DestinationPath "$tempDir" -Force
+              Write-Host "✓ Extracted FFmpeg archive"
+              
+              # Find FFmpeg folder in extracted content
+              $ffmpegFolder = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "*ffmpeg*" } | Select-Object -First 1
+              
+              if ($ffmpegFolder) {
+                $ffmpegExe = Join-Path $ffmpegFolder.FullName "bin\ffmpeg.exe"
+                $ffprobeExe = Join-Path $ffmpegFolder.FullName "bin\ffprobe.exe"
+                
+                Write-Host "✓ Found FFmpeg binaries in: $($ffmpegFolder.Name)"
+              } else {
+                Write-Host "⚠ FFmpeg folder not found, searching recursively..."
+                $ffmpegExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+                $ffprobeExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+              }
+            } catch {
+              Write-Host "⚠ Failed to download from gyan.dev, trying alternative source..."
+              
+              # Fallback to BtbN builds
+              $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+              Invoke-WebRequest -Uri $ffmpegUrl -OutFile "$tempDir\ffmpeg.zip" -UseBasicParsing
+              Expand-Archive -Path "$tempDir\ffmpeg.zip" -DestinationPath "$tempDir" -Force
+              
+              $ffmpegExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+              $ffprobeExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+            }
             
             if ($ffmpegExe -and $ffprobeExe) {
               New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
