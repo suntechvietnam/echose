@@ -83,13 +83,8 @@ jobs:
             echo "FFmpeg path: src-tauri\resources\ffmpeg.exe" 
             echo "FFprobe path: src-tauri\resources\ffprobe.exe"
             
-            # Update tauri.conf.json to include resources now that they exist
-            Write-Host "Updating tauri.conf.json to include resources..."
-            $configPath = "src-tauri\tauri.conf.json"
-            $config = Get-Content $configPath | ConvertFrom-Json
-            $config.tauri.bundle.resources = @("resources/**")
-            $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
-            Write-Host "Updated tauri.conf.json with resources"
+            # FFmpeg will be manually copied to bundle after build completes
+            Write-Host "FFmpeg downloaded and ready for manual bundle inclusion"
           } else {
             echo "Error: Could not find ffmpeg.exe or ffprobe.exe in downloaded archive"
             exit 1
@@ -414,6 +409,55 @@ jobs:
             } else {
               Write-Host "✗ Alternative method also failed to create bundle directory"
             }
+          }
+
+      - name: Create bundle with FFmpeg resources
+        if: steps.build.outcome == 'success'
+        run: |
+          Write-Host "=== Creating bundle with FFmpeg resources ==="
+          
+          # Check if we have FFmpeg files
+          $ffmpegExists = Test-Path "src-tauri\resources\ffmpeg.exe"
+          $ffprobeExists = Test-Path "src-tauri\resources\ffprobe.exe"
+          
+          if ($ffmpegExists -and $ffprobeExists) {
+            Write-Host "FFmpeg files found, updating tauri.conf.json temporarily..."
+            
+            # Backup original config
+            Copy-Item "src-tauri\tauri.conf.json" "src-tauri\tauri.conf.json.backup"
+            
+            # Update config to include resources
+            $configPath = "src-tauri\tauri.conf.json"
+            $config = Get-Content $configPath | ConvertFrom-Json
+            
+            # Add resources to bundle config
+            $config.tauri.bundle | Add-Member -Name "resources" -Value @("resources/**") -MemberType NoteProperty -Force
+            
+            # Save updated config
+            $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
+            Write-Host "Updated tauri.conf.json to include resources"
+            
+            # Run bundle command only (skip full build since executable already exists)
+            Write-Host "Creating bundle with resources..."
+            try {
+              npx tauri build --bundles all --skip-build 2>&1 | Tee-Object -Variable bundleOutput
+              $bundleExitCode = $LASTEXITCODE
+              Write-Host "Bundle creation exit code: $bundleExitCode"
+              
+              if ($bundleExitCode -eq 0) {
+                Write-Host "✓ Bundle with FFmpeg created successfully"
+              } else {
+                Write-Host "Bundle creation failed, trying manual approach..."
+              }
+            } catch {
+              Write-Host "Bundle command failed: $_"
+            }
+            
+            # Restore original config
+            Move-Item "src-tauri\tauri.conf.json.backup" "src-tauri\tauri.conf.json" -Force
+            Write-Host "Restored original tauri.conf.json"
+          } else {
+            Write-Host "⚠ FFmpeg files not found, skipping resource bundle"
           }
         env:
           CARGO_TERM_COLOR: always
