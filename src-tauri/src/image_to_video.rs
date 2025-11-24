@@ -967,6 +967,8 @@ async fn merge_video_with_audio(
         }
     })?;
     
+    eprintln!("🎵 merge_video_with_audio - FFmpeg path: {}", ffmpeg_path);
+    
     // Build ffmpeg command để merge video với audio
     // Sử dụng -stream_loop -1 để loop video cho đến hết audio
     // -shortest để đảm bảo output dừng khi audio kết thúc
@@ -980,7 +982,9 @@ async fn merge_video_with_audio(
         .arg("-c:v")
         .arg("copy") // Copy video stream - nhanh nhất
         .arg("-c:a")
-        .arg("copy") // Copy audio stream - nhanh nhất
+        .arg("aac") // Encode audio thành AAC (video có thể không có audio stream)
+        .arg("-b:a")
+        .arg("256k") // Bitrate audio 256kbps cho chất lượng cao nhất
         .arg("-map")
         .arg("0:v:0") // Video từ input 0
         .arg("-map")
