@@ -440,7 +440,7 @@ pub async fn create_video_from_images(
     } else {
         // Concat các segments với transitions
         let output_filename = format!("final_video_{}.mp4", timestamp);
-        let final_video = work_dir.join(&output_filename);
+        let final_video = output_path.join(&output_filename); // Lưu trực tiếp vào thư mục user chọn
         let final_video_path_str = final_video.to_string_lossy().to_string();
         
         // Transition duration mặc định là 1 giây
@@ -469,6 +469,9 @@ pub async fn create_video_from_images(
             let mut folders = IMAGE_VIDEO_OUTPUT_FOLDERS.lock().unwrap();
             folders.insert(process_id.clone(), output_folder.clone());
         }
+        
+        // Xóa thư mục work_dir chứa các video segments sau khi hoàn thành
+        let _ = fs::remove_dir_all(&work_dir);
         
         final_video_path_str
     };
@@ -772,10 +775,12 @@ async fn concat_with_pipeline_approach(
     fs::copy(&current_output_str, output_path)
         .map_err(|e| format!("Lỗi khi copy file cuối cùng: {}", e))?;
     
-    // Cleanup: Xóa file trung gian cuối cùng và thư mục
+    // Bước 4: Xóa file trung gian cuối cùng
     let _ = fs::remove_file(&current_output_str);
-    let _ = fs::remove_dir_all(&pipeline_work_dir);
     
+    // Bước 5: Xóa thư mục pipeline tạm (bao gồm tất cả file trung gian)
+    let _ = fs::remove_dir_all(&pipeline_work_dir);
+
     Ok(())
 }
 
