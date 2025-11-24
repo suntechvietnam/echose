@@ -35,21 +35,15 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install Pillow
-        run: pip install Pillow
-
-      - name: Generate Windows icon
+      - name: Verify Windows icon exists
         run: |
-          python -c "from PIL import Image; img = Image.open('src-tauri/icons/icon.png'); img.save('src-tauri/icons/icon.ico', format='ICO', sizes=[(256,256), (128,128), (64,64), (48,48), (32,32), (16,16)])"
           if (Test-Path "src-tauri\icons\icon.ico") {
-            Write-Host "icon.ico created successfully"
+            $fileInfo = Get-Item "src-tauri\icons\icon.ico"
+            Write-Host "✓ icon.ico found: $($fileInfo.FullName)"
+            Write-Host "  Size: $($fileInfo.Length) bytes"
           } else {
-            Write-Host "Error: Failed to create icon.ico"
+            Write-Host "Error: icon.ico not found. Please add icon.ico to src-tauri/icons/"
+            Write-Host "You can generate it using: python scripts/generate_icon.py"
             exit 1
           }
 
@@ -75,9 +69,74 @@ jobs:
             exit 1
           }
 
+      - name: Install build tools (NSIS and WiX)
+        run: |
+          Write-Host "Checking for Chocolatey..."
+          if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Host "Chocolatey not found, installing..."
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          }
+          
+          Write-Host "Installing NSIS and WiX Toolset..."
+          # Install NSIS for NSIS installer
+          choco install nsis -y --no-progress
+          # Install WiX Toolset v3 for MSI installer  
+          choco install wixtoolset -y --no-progress
+          
+          # Refresh environment variables
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
+          Write-Host "Build tools installed"
+          
+          # Verify installations
+          Write-Host "Checking NSIS..."
+          $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (Test-Path $nsisPath) {
+            Write-Host "✓ NSIS found at $nsisPath"
+            & $nsisPath /VERSION
+          } else {
+            Write-Host "✗ NSIS not found"
+          }
+          
+          Write-Host "Checking WiX..."
+          $wixPath = "C:\Program Files (x86)\WiX Toolset v3.11\bin\candle.exe"
+          if (Test-Path $wixPath) {
+            Write-Host "✓ WiX found at $wixPath"
+          } else {
+            Write-Host "✗ WiX not found (may be installed in different location)"
+          }
+
       - name: Build Windows installer
         id: build
-        run: npm run tauri:build:windows
+        run: |
+          Write-Host "Building Windows installer..."
+          npm run tauri:build:windows
+          $buildExitCode = $LASTEXITCODE
+          Write-Host "Build exit code: $buildExitCode"
+          
+          # Check if bundle directory was created
+          $bundleDir = "src-tauri\target\release\bundle"
+          if (Test-Path $bundleDir) {
+            Write-Host "✓ Bundle directory created: $bundleDir"
+            Get-ChildItem -Path $bundleDir -Recurse | ForEach-Object {
+              Write-Host "  $($_.FullName)"
+            }
+          } else {
+            Write-Host "✗ Bundle directory NOT created: $bundleDir"
+            Write-Host "Checking release directory..."
+            if (Test-Path "src-tauri\target\release") {
+              Get-ChildItem -Path "src-tauri\target\release" | ForEach-Object {
+                Write-Host "  $($_.FullName)"
+              }
+            }
+          }
+          
+          if ($buildExitCode -ne 0) {
+            Write-Host "Build failed with exit code $buildExitCode"
+            exit $buildExitCode
+          }
         env:
           CARGO_TERM_COLOR: always
         continue-on-error: false

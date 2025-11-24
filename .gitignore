@@ -18,7 +18,6 @@ logs/
 */*.DS_Store
 # Rust/Tauri build artifacts
 frontend/src-tauri/target/
-**/target/
 node_modules
 src-tauri/Cargo.lock
 # IDE - VSCode
