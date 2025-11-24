@@ -59,14 +59,13 @@
       "resources": ["resources/**"],
       "externalBin": [],
       "copyright": "",
-      "category": "VideoTool",
+      "category": "Utility",
       "shortDescription": "YTBFlow Desktop App",
       "longDescription": "YTBFlow Desktop App for video processing and YouTube content management",
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
         "timestampUrl": "",
-        "tsp": false,
         "wix": {
           "language": "en-US"
         },

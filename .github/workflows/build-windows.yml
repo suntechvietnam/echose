@@ -121,11 +121,46 @@ jobs:
           }
           
           Write-Host "`nRunning: npm run tauri:build:windows"
+          Write-Host "Environment variables:"
+          Write-Host "  CARGO_HOME: $env:CARGO_HOME"
+          Write-Host "  Path includes: $($env:PATH -split ';' | Where-Object { $_ -like '*nsis*' -or $_ -like '*wix*' -or $_ -like '*cargo*' })"
+          
+          # Check if build tools are accessible
+          Write-Host "`nChecking build tools accessibility:"
+          try {
+            $nsisVersion = & "C:\Program Files (x86)\NSIS\makensis.exe" /VERSION 2>&1
+            Write-Host "  NSIS: $nsisVersion"
+          } catch {
+            Write-Host "  NSIS: Not accessible - $_"
+          }
+          
+          try {
+            $wixPath = Get-Command candle.exe -ErrorAction SilentlyContinue
+            if ($wixPath) {
+              Write-Host "  WiX candle.exe: Found at $($wixPath.Source)"
+            } else {
+              Write-Host "  WiX candle.exe: Not found in PATH"
+            }
+          } catch {
+            Write-Host "  WiX: Error checking - $_"
+          }
+          
+          Write-Host "`nStarting build..."
           npm run tauri:build:windows 2>&1 | Tee-Object -FilePath "build.log"
           $buildExitCode = $LASTEXITCODE
           Write-Host "`nBuild exit code: $buildExitCode"
           
           Write-Host "`n=== Checking build output ==="
+          
+          # Check target directory structure
+          $targetDir = "src-tauri\target"
+          if (Test-Path $targetDir) {
+            Write-Host "✓ Target directory exists: $targetDir"
+            Write-Host "Target directory structure:"
+            Get-ChildItem -Path $targetDir -Recurse -Directory | ForEach-Object {
+              Write-Host "  DIR: $($_.FullName.Replace((Get-Location).Path, '.'))"
+            }
+          }
           
           # Check executable
           $exePath = "src-tauri\target\release\ytbflow.exe"
@@ -133,8 +168,18 @@ jobs:
             Write-Host "✓ Executable found: $exePath"
             $exeInfo = Get-Item $exePath
             Write-Host "  Size: $($exeInfo.Length) bytes"
+            Write-Host "  Created: $($exeInfo.CreationTime)"
           } else {
             Write-Host "✗ Executable NOT found: $exePath"
+            Write-Host "Checking release directory contents:"
+            $releaseDir = "src-tauri\target\release"
+            if (Test-Path $releaseDir) {
+              Get-ChildItem -Path $releaseDir | ForEach-Object {
+                Write-Host "  $($_.Name) - $($_.Length) bytes"
+              }
+            } else {
+              Write-Host "  Release directory does not exist"
+            }
           }
           
           # Check bundle directory
@@ -165,9 +210,38 @@ jobs:
             Get-Content "build.log" -Tail 50 | ForEach-Object { Write-Host $_ }
           }
           
+          # Always show build log analysis first
+          Write-Host "`n=== Build Log Analysis ==="
+          if (Test-Path "build.log") {
+            $buildLog = Get-Content "build.log" -Raw
+            
+            # Check for common bundle-related errors
+            Write-Host "Checking for bundle-related errors:"
+            if ($buildLog -match "NSIS") {
+              Write-Host "  - NSIS references found in log"
+              $buildLog -split "`n" | Where-Object { $_ -match "NSIS|nsis" } | ForEach-Object { Write-Host "    $_" }
+            }
+            if ($buildLog -match "WiX|wix") {
+              Write-Host "  - WiX references found in log"
+              $buildLog -split "`n" | Where-Object { $_ -match "WiX|wix" } | ForEach-Object { Write-Host "    $_" }
+            }
+            if ($buildLog -match "bundle|Bundle") {
+              Write-Host "  - Bundle references found in log"
+              $buildLog -split "`n" | Where-Object { $_ -match "bundle|Bundle" } | ForEach-Object { Write-Host "    $_" }
+            }
+            if ($buildLog -match "error:|Error:|ERROR:") {
+              Write-Host "  - Errors found in log:"
+              $buildLog -split "`n" | Where-Object { $_ -match "error:|Error:|ERROR:" } | ForEach-Object { Write-Host "    $_" }
+            }
+            if ($buildLog -match "warning:|Warning:|WARNING:") {
+              Write-Host "  - Warnings found in log:"
+              $buildLog -split "`n" | Where-Object { $_ -match "warning:|Warning:|WARNING:" } | ForEach-Object { Write-Host "    $_" }
+            }
+          }
+          
           if ($buildExitCode -ne 0) {
             Write-Host "`n✗ Build failed with exit code $buildExitCode"
-            Write-Host "Showing full build log for debugging:"
+            Write-Host "`nFull build log:"
             if (Test-Path "build.log") {
               Get-Content "build.log"
             }
