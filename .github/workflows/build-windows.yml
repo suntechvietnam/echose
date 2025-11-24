@@ -82,21 +82,43 @@ jobs:
           Write-Host "Installing NSIS and WiX Toolset..."
           # Install NSIS for NSIS installer
           choco install nsis -y --no-progress
-          # Install WiX Toolset v3 for MSI installer  
-          choco install wixtoolset -y --no-progress
+          # Install WiX Toolset v3 for MSI installer (specific version)
+          choco install wixtoolset --version=3.11.2 -y --no-progress --force
           
           # Refresh environment variables
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
-          # Add NSIS and WiX to PATH explicitly
+          # Add NSIS and WiX to PATH explicitly with multiple location checks
           $nsisBin = "C:\Program Files (x86)\NSIS"
-          $wixBin = "C:\Program Files (x86)\WiX Toolset v3.11\bin"
+          $wixBins = @(
+            "C:\Program Files (x86)\WiX Toolset v3.11\bin",
+            "C:\Program Files\WiX Toolset v3.11\bin",
+            "C:\tools\WiX\bin"
+          )
           
           if (Test-Path $nsisBin) {
             $env:Path += ";$nsisBin"
+            Write-Host "Added NSIS to PATH: $nsisBin"
           }
-          if (Test-Path $wixBin) {
-            $env:Path += ";$wixBin"
+          
+          $wixFound = $false
+          foreach ($wixBin in $wixBins) {
+            if (Test-Path $wixBin) {
+              $env:Path += ";$wixBin"
+              Write-Host "Added WiX to PATH: $wixBin"
+              $wixFound = $true
+              break
+            }
+          }
+          
+          if (-not $wixFound) {
+            Write-Host "WiX not found at expected locations, searching..."
+            $wixSearch = Get-ChildItem -Path "C:\Program Files*" -Filter "candle.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($wixSearch) {
+              $wixDir = $wixSearch.DirectoryName
+              $env:Path += ";$wixDir"
+              Write-Host "Found and added WiX to PATH: $wixDir"
+            }
           }
           
           Write-Host "Build tools installed"
@@ -163,15 +185,33 @@ jobs:
             Write-Host "Added NSIS to PATH: $nsisPath"
           }
           
+          # Search for WiX in multiple possible locations
           $wixPaths = @(
             "C:\Program Files (x86)\WiX Toolset v3.11\bin",
-            "C:\Program Files\WiX Toolset v3.11\bin"
+            "C:\Program Files\WiX Toolset v3.11\bin",
+            "C:\Program Files (x86)\Microsoft SDKs\Windows\WiX\v3.11\bin",
+            "C:\tools\WiX\bin"
           )
+          
+          $wixFound = $false
           foreach ($wixPath in $wixPaths) {
             if (Test-Path $wixPath) {
               $env:PATH += ";$wixPath"
               Write-Host "Added WiX to PATH: $wixPath"
+              $wixFound = $true
               break
+            }
+          }
+          
+          # If not found in expected locations, search system-wide
+          if (-not $wixFound) {
+            Write-Host "Searching for WiX system-wide..."
+            $foundWix = Get-ChildItem -Path "C:\" -Filter "candle.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($foundWix) {
+              $wixPath = $foundWix.DirectoryName
+              $env:PATH += ";$wixPath"
+              Write-Host "Found and added WiX to PATH: $wixPath"
+              $wixFound = $true
             }
           }
           
@@ -189,6 +229,20 @@ jobs:
             Write-Host "✓ WiX candle.exe: Accessible"
           } catch {
             Write-Host "✗ WiX candle.exe not accessible: $_"
+            Write-Host "Attempting to download WiX directly..."
+            
+            # Download WiX directly if chocolatey install failed
+            try {
+              $wixUrl = "https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip"
+              $wixDir = "C:\tools\WiX"
+              New-Item -ItemType Directory -Force -Path $wixDir | Out-Null
+              Invoke-WebRequest -Uri $wixUrl -OutFile "$wixDir\wix.zip"
+              Expand-Archive -Path "$wixDir\wix.zip" -DestinationPath $wixDir -Force
+              $env:Path += ";$wixDir"
+              Write-Host "✓ WiX downloaded and added to PATH: $wixDir"
+            } catch {
+              Write-Host "✗ Failed to download WiX: $_"
+            }
           }
 
       - name: Debug Tauri Configuration
