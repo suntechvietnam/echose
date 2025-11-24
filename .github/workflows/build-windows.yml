@@ -373,14 +373,14 @@ jobs:
             
             # Try method 1: Direct tauri CLI
             Write-Host "Method 1: Direct tauri CLI with specific target"
-            npx tauri build --target x86_64-pc-windows-msvc --bundles all 2>&1 | Tee-Object -Variable alt1Output
+            npx tauri build --target x86_64-pc-windows-msvc --bundles msi,nsis 2>&1 | Tee-Object -Variable alt1Output
             $alt1ExitCode = $LASTEXITCODE
             Write-Host "Method 1 exit code: $alt1ExitCode"
             
             if (-not (Test-Path $bundleDir) -and $alt1ExitCode -eq 0) {
               # Try method 2: Tauri build without target specification
               Write-Host "`nMethod 2: Tauri CLI without target specification"
-              npx tauri build --bundles all 2>&1 | Tee-Object -Variable alt2Output
+              npx tauri build --bundles msi,nsis 2>&1 | Tee-Object -Variable alt2Output
               $alt2ExitCode = $LASTEXITCODE
               Write-Host "Method 2 exit code: $alt2ExitCode"
             }
@@ -390,7 +390,7 @@ jobs:
               Write-Host "`nMethod 3: Direct cargo tauri command"
               cd src-tauri
               try {
-                cargo tauri build --bundles all 2>&1 | Tee-Object -Variable alt3Output
+                cargo tauri build --bundles msi,nsis 2>&1 | Tee-Object -Variable alt3Output
                 $alt3ExitCode = $LASTEXITCODE
                 Write-Host "Method 3 exit code: $alt3ExitCode"
               } catch {
@@ -440,7 +440,7 @@ jobs:
             # Run bundle command only (skip full build since executable already exists)
             Write-Host "Creating bundle with resources..."
             try {
-              npx tauri build --bundles all --skip-build 2>&1 | Tee-Object -Variable bundleOutput
+              npx tauri build --bundles msi,nsis --skip-build 2>&1 | Tee-Object -Variable bundleOutput
               $bundleExitCode = $LASTEXITCODE
               Write-Host "Bundle creation exit code: $bundleExitCode"
               

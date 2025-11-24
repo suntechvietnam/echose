@@ -47,7 +47,7 @@
     },
     "bundle": {
       "active": true,
-      "targets": "all", 
+      "targets": ["msi", "nsis"], 
       "identifier": "com.ytbflow.app",
       "icon": [
         "icons/32x32.png",
