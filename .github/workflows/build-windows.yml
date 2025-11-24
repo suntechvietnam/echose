@@ -143,6 +143,90 @@ jobs:
             }
           }
 
+      - name: Verify Build Tools and Environment
+        run: |
+          Write-Host "=== Build Tools Verification ==="
+          
+          # Check PATH for build tools
+          Write-Host "Checking PATH for build tools:"
+          $pathEntries = $env:PATH -split ';' | Where-Object { $_ -match '(nsis|wix|cargo|rust)' -and $_ -ne '' }
+          if ($pathEntries) {
+            $pathEntries | ForEach-Object { Write-Host "  $_" }
+          } else {
+            Write-Host "  No relevant build tool paths found in PATH"
+          }
+          
+          # Force add build tools to PATH
+          $nsisPath = "C:\Program Files (x86)\NSIS"
+          if (Test-Path $nsisPath) {
+            $env:PATH += ";$nsisPath"
+            Write-Host "Added NSIS to PATH: $nsisPath"
+          }
+          
+          $wixPaths = @(
+            "C:\Program Files (x86)\WiX Toolset v3.11\bin",
+            "C:\Program Files\WiX Toolset v3.11\bin"
+          )
+          foreach ($wixPath in $wixPaths) {
+            if (Test-Path $wixPath) {
+              $env:PATH += ";$wixPath"
+              Write-Host "Added WiX to PATH: $wixPath"
+              break
+            }
+          }
+          
+          # Verify tools are accessible
+          Write-Host "`nTesting tool accessibility:"
+          try {
+            $nsisOutput = & makensis.exe /VERSION 2>&1
+            Write-Host "✓ NSIS: $nsisOutput"
+          } catch {
+            Write-Host "✗ NSIS makensis not accessible: $_"
+          }
+          
+          try {
+            $candleOutput = & candle.exe --help 2>&1 | Select-Object -First 1
+            Write-Host "✓ WiX candle.exe: Accessible"
+          } catch {
+            Write-Host "✗ WiX candle.exe not accessible: $_"
+          }
+
+      - name: Debug Tauri Configuration
+        run: |
+          Write-Host "=== Tauri CLI Debug Information ==="
+          
+          # Check Tauri CLI version
+          Write-Host "Tauri CLI version:"
+          npx tauri --version
+          
+          # Check if tauri.conf.json is valid
+          Write-Host "`nTauri configuration check:"
+          if (Test-Path "src-tauri\tauri.conf.json") {
+            Write-Host "✓ tauri.conf.json exists"
+            try {
+              $config = Get-Content "src-tauri\tauri.conf.json" | ConvertFrom-Json
+              Write-Host "✓ tauri.conf.json is valid JSON"
+              
+              if ($config.tauri.bundle) {
+                Write-Host "Bundle configuration found:"
+                Write-Host "  Active: $($config.tauri.bundle.active)"
+                Write-Host "  Targets: $($config.tauri.bundle.targets -join ', ')"
+                Write-Host "  Identifier: $($config.tauri.bundle.identifier)"
+              } else {
+                Write-Host "✗ No bundle configuration found!"
+              }
+            } catch {
+              Write-Host "✗ tauri.conf.json is invalid: $_"
+            }
+          } else {
+            Write-Host "✗ tauri.conf.json not found!"
+          }
+          
+          # Test the build command manually first
+          Write-Host "`nTesting build command components:"
+          Write-Host "Command that will be executed:"
+          npm run tauri:build:windows --dry-run 2>&1 | Write-Host
+
       - name: Build Windows installer
         id: build
         run: |
@@ -210,10 +294,53 @@ jobs:
           
           if (-not (Test-Path $bundleDir)) {
             Write-Host "`n⚠ Warning: Build completed but bundle directory was not created"
-            Write-Host "This might indicate that bundle creation was skipped or failed silently"
+            Write-Host "Attempting alternative build method..."
+            
+            # Try method 1: Direct tauri CLI
+            Write-Host "Method 1: Direct tauri CLI with specific target"
+            npx tauri build --target x86_64-pc-windows-msvc --bundles all 2>&1 | Tee-Object -Variable alt1Output
+            $alt1ExitCode = $LASTEXITCODE
+            Write-Host "Method 1 exit code: $alt1ExitCode"
+            
+            if (-not (Test-Path $bundleDir) -and $alt1ExitCode -eq 0) {
+              # Try method 2: Tauri build without target specification
+              Write-Host "`nMethod 2: Tauri CLI without target specification"
+              npx tauri build --bundles all 2>&1 | Tee-Object -Variable alt2Output
+              $alt2ExitCode = $LASTEXITCODE
+              Write-Host "Method 2 exit code: $alt2ExitCode"
+            }
+            
+            if (-not (Test-Path $bundleDir)) {
+              # Try method 3: Cargo tauri (if available)
+              Write-Host "`nMethod 3: Direct cargo tauri command"
+              cd src-tauri
+              try {
+                cargo tauri build --bundles all 2>&1 | Tee-Object -Variable alt3Output
+                $alt3ExitCode = $LASTEXITCODE
+                Write-Host "Method 3 exit code: $alt3ExitCode"
+              } catch {
+                Write-Host "Method 3 failed: $_"
+              }
+              cd ..
+            }
+            
+            Write-Host "`nAlternative build output:"
+            $altBuildOutput
+            Write-Host "Alternative build exit code: $altExitCode"
+            
+            # Check again for bundle directory
+            if (Test-Path $bundleDir) {
+              Write-Host "✓ Bundle directory created by alternative method"
+            } else {
+              Write-Host "✗ Alternative method also failed to create bundle directory"
+            }
           }
         env:
           CARGO_TERM_COLOR: always
+          TAURI_PRIVATE_KEY: ""
+          TAURI_KEY_PASSWORD: ""
+          RUST_BACKTRACE: 1
+          TAURI_BUNDLE: "true"
         continue-on-error: false
 
       - name: Debug - List all bundle directories
