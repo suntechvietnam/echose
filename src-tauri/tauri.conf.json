@@ -51,30 +51,12 @@
       "identifier": "com.ytbflow.app",
       "icon": [
         "icons/32x32.png",
-        "icons/128x128.png",
+        "icons/128x128.png", 
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "resources": ["resources/**"],
-      "externalBin": [],
-      "copyright": "",
-      "category": "Utility",
-      "shortDescription": "YTBFlow Desktop App",
-      "longDescription": "YTBFlow Desktop App for video processing and YouTube content management",
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": "",
-        "wix": {
-          "language": ["en-US"]
-        },
-        "nsis": {
-          "installerIcon": "icons/icon.ico",
-          "installMode": "perUser",
-          "languages": ["English"]
-        }
-      }
+      "resources": ["resources/**"]
     },
     "security": {
       "csp": null
