@@ -285,6 +285,7 @@ pub async fn create_video_from_images(
     video_aspect_ratio: String,
     image_effect_type: String,
     video_effect_type: String,
+    audio_files: Vec<String>,
     output_folder: String,
     _processes: tauri::State<'_, ProcessStore>,  // Reserved for future use
 ) -> Result<String, String> {
@@ -476,7 +477,57 @@ pub async fn create_video_from_images(
         final_video_path_str
     };
     
-    Ok(format!("Video đã được tạo thành công! {}", final_video_path))
+    // Xử lý audio nếu có (tùy chọn không bắt buộc)
+    let final_output_path = if !audio_files.is_empty() {
+        
+        // Tạo tên file cuối cùng với audio
+        let final_with_audio_filename = format!("final_video_with_audio_{}.mp4", timestamp);
+        let final_with_audio_path = output_path.join(&final_with_audio_filename);
+        let final_with_audio_path_str = final_with_audio_path.to_string_lossy().to_string();
+        
+        // Lưu số lượng audio files trước khi move
+        let audio_files_count = audio_files.len();
+        
+        // Bước 1: Merge audio files nếu có nhiều hơn 1 file
+        let merged_audio_path = if audio_files_count > 1 {
+            let merged_audio_filename = format!("merged_audio_{}.mp3", timestamp);
+            let merged_audio_file = output_path.join(&merged_audio_filename);
+            let merged_audio_path_str = merged_audio_file.to_string_lossy().to_string();
+            
+            merge_audio_files(audio_files, &merged_audio_path_str).await
+                .map_err(|e| format!("Lỗi khi merge audio: {}", e))?;
+            
+            merged_audio_path_str
+        } else {
+            // Chỉ có 1 file audio, sử dụng trực tiếp
+            let single_audio_path = audio_files[0].clone();
+            // Drop audio_files để tránh warning về unused value
+            drop(audio_files);
+            single_audio_path
+        };
+        
+        // Bước 2: Merge video với audio (video sẽ loop để match audio duration)
+        
+        merge_video_with_audio(
+            &final_video_path,
+            &merged_audio_path,
+            &final_with_audio_path_str,
+        ).await.map_err(|e| format!("Lỗi khi merge video với audio: {}", e))?;
+        
+        // Xóa file audio tạm nếu đã merge nhiều file
+        if audio_files_count > 1 {
+            let _ = fs::remove_file(&merged_audio_path);
+        }
+        
+        // Xóa file video gốc (không có audio)
+        let _ = fs::remove_file(&final_video_path);
+        
+        final_with_audio_path_str
+    } else {
+        final_video_path
+    };
+    
+    Ok(format!("Video đã được tạo thành công! {}", final_output_path))
 }
 
 /// Dừng quá trình tạo video từ ảnh và cleanup toàn bộ file đã tạo
@@ -819,5 +870,135 @@ async fn concat_video_segments_with_transitions_helper(
         transition_duration,
         output_path,
     ).await;
+}
+
+// ============================================================================
+// Audio Processing Functions
+// ============================================================================
+/**
+ * Merge nhiều file audio thành một file duy nhất
+ */
+async fn merge_audio_files(
+    audio_files: Vec<String>,
+    output_audio_path: &str,
+) -> Result<(), String> {
+    if audio_files.is_empty() {
+        return Err("Cần ít nhất một file audio".to_string());
+    }
+    
+    if audio_files.len() == 1 {
+        // Chỉ có 1 file, copy trực tiếp
+        fs::copy(&audio_files[0], output_audio_path)
+            .map_err(|e| format!("Lỗi khi copy file audio: {}", e))?;
+        return Ok(());
+    }
+    
+    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
+        #[cfg(target_os = "windows")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
+        }
+    })?;
+    
+    // Tạo file concat list cho audio
+    let output_path_buf = PathBuf::from(output_audio_path);
+    let work_dir = output_path_buf.parent()
+        .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
+    
+    let audio_concat_list_file = create_concat_list_file(&audio_files, &work_dir.to_path_buf())?;
+    
+    // Build ffmpeg command để merge audio
+    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    cmd.arg("-f")
+        .arg("concat")
+        .arg("-safe")
+        .arg("0")
+        .arg("-i")
+        .arg(audio_concat_list_file.to_string_lossy().as_ref())
+        .arg("-c:a")
+        .arg("copy") // Copy audio stream - nhanh nhất
+        .arg("-y")
+        .arg(output_audio_path);
+    
+    // Chạy và đợi process hoàn thành
+    let output = cmd.output().await
+        .map_err(|e| format!("Lỗi khi merge audio: {}", e))?;
+    
+    // Cleanup file concat list
+    let _ = fs::remove_file(&audio_concat_list_file);
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        eprintln!("FFmpeg Audio Merge Error: {}", error_msg);
+        return Err(format!("Lỗi khi merge audio: {}", error_msg));
+    }
+    
+    Ok(())
+}
+
+/**
+ * Merge video với audio, đảm bảo video loop để match với audio duration
+ */
+async fn merge_video_with_audio(
+    video_path: &str,
+    audio_path: &str,
+    output_path: &str,
+) -> Result<(), String> {
+    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
+        #[cfg(target_os = "windows")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
+        }
+    })?;
+    
+    // Build ffmpeg command để merge video với audio
+    // Sử dụng -stream_loop -1 để loop video cho đến hết audio
+    // -shortest để đảm bảo output dừng khi audio kết thúc
+    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    cmd.arg("-stream_loop")
+        .arg("-1") // Loop video vô hạn
+        .arg("-i")
+        .arg(video_path)
+        .arg("-i")
+        .arg(audio_path)
+        .arg("-c:v")
+        .arg("copy") // Copy video stream - nhanh nhất
+        .arg("-c:a")
+        .arg("copy") // Copy audio stream - nhanh nhất
+        .arg("-map")
+        .arg("0:v:0") // Video từ input 0
+        .arg("-map")
+        .arg("1:a:0") // Audio từ input 1
+        .arg("-shortest") // Dừng khi stream ngắn nhất (audio) kết thúc
+        .arg("-avoid_negative_ts")
+        .arg("make_zero") // Tránh lỗi timestamp âm
+        .arg("-y")
+        .arg(output_path);
+    
+    // Chạy và đợi process hoàn thành
+    let output = cmd.output().await
+        .map_err(|e| format!("Lỗi khi merge video với audio: {}", e))?;
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Lỗi khi merge video với audio: {}", error_msg));
+    }
+    Ok(())
 }
 

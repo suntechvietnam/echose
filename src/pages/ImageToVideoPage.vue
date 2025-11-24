@@ -218,6 +218,7 @@ import draggable from 'vuedraggable'
 import { open } from '@tauri-apps/api/dialog'
 import { readBinaryFile } from '@tauri-apps/api/fs'
 import { useTauri } from '../composables/useTauri'
+import { useAudioDuration } from '../composables/useAudioDuration'
 import ImportAudioSection from '@/components/ImportAudioSection.vue'
 import '../assets/css/image-to-video.css'
 
@@ -239,6 +240,7 @@ import vusliceImg from '../assets/img/effects/vuslice.gif'
 import vuwindImg from '../assets/img/effects/vuwind.gif'
 
 const { callCommand } = useTauri()
+const { loadFileDuration } = useAudioDuration()
 
 // Image files - store file paths
 const imageFiles = ref([])
@@ -480,6 +482,49 @@ const createVideoFromImages = async () => {
     return
   }
   
+  // Validate audio nếu có - Tùy chọn không bắt buộc
+  if (audioFiles.value.length > 0) {
+    try {
+      statusMessage.value = '⏳ Đang kiểm tra thời gian audio...'
+      statusType.value = 'info'
+      
+      // Tính tổng thời gian video từ ảnh (giây)
+      // Công thức: (số ảnh * thời gian mỗi ảnh) + số ảnh (cho transition)
+      const totalVideoTime = (imageFiles.value.length * imageDuration.value) + imageFiles.value.length
+      
+      // Tính tổng thời gian audio
+      let totalAudioTime = 0
+      for (const audioFile of audioFiles.value) {
+        const audioDuration = await loadFileDuration(audioFile)
+        if (audioDuration) {
+          totalAudioTime += audioDuration
+        }
+      }
+      
+      // Kiểm tra xem audio có đủ dài không
+      if (totalAudioTime < totalVideoTime) {
+        statusMessage.value = `❌ Thời gian audio (${Math.round(totalAudioTime)}s) ngắn hơn thời gian video (${totalVideoTime}s). Vui lòng thêm audio hoặc giảm thời gian mỗi ảnh.`
+        statusType.value = 'error'
+        return
+      }
+      
+      statusMessage.value = `✅ Audio hợp lệ: ${Math.round(totalAudioTime)}s >= ${totalVideoTime}s`
+      statusType.value = 'success'
+      
+      // Delay một chút để user thấy message
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+    } catch (error) {
+      statusMessage.value = '❌ Lỗi khi kiểm tra audio: ' + error
+      statusType.value = 'error'
+      return
+    }
+  } else {
+    // Không có audio - tạo video không âm thanh
+    statusMessage.value = '📹 Tạo video không có âm thanh'
+    statusType.value = 'info'
+  }
+  
   isCreating.value = true
   progress.value = 5
   statusMessage.value = '⏳ Đang bắt đầu tạo video từ ảnh...'
@@ -597,7 +642,6 @@ const handleAudioCleared = () => {
 
 const handleImageError = (event) => {
   // Handle error when effect preview image fails to load
-  console.warn('Failed to load effect preview image:', event.target.src)
   // Optionally hide the image or show a placeholder
   event.target.style.display = 'none'
 }
