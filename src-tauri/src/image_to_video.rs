@@ -10,103 +10,99 @@ use uuid::Uuid;
 
 /// Tìm đường dẫn đến FFmpeg executable
 pub fn find_ffmpeg() -> Option<String> {
-    // Xác định tên file FFmpeg theo platform
-    #[cfg(target_os = "windows")]
-    let ffmpeg_name = "ffmpeg.exe";
-    #[cfg(not(target_os = "windows"))]
-    let ffmpeg_name = "ffmpeg";
-    
-    // Ưu tiên tìm trong app bundle trước (khi được bundle vào app)
+    // Lấy đường dẫn executable hiện tại
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(app_dir) = exe_path.parent() {
-            #[cfg(target_os = "macos")]
-            {
-                // Trên macOS: App.app/Contents/Resources/resources/ffmpeg hoặc App.app/Contents/Resources/ffmpeg
-                if let Some(contents_dir) = app_dir.parent() {
-                    let resources_dir = contents_dir.join("Resources");
-                    
-                    // Thử tìm trong resources/ffmpeg (khi được bundle)
-                    let bundled_ffmpeg1 = resources_dir.join("resources").join(ffmpeg_name);
-                    if bundled_ffmpeg1.exists() {
-                        return Some(bundled_ffmpeg1.to_string_lossy().to_string());
-                    }
-                    
-                    // Thử tìm trực tiếp trong Resources/ffmpeg
-                    let bundled_ffmpeg2 = resources_dir.join(ffmpeg_name);
-                    if bundled_ffmpeg2.exists() {
-                        return Some(bundled_ffmpeg2.to_string_lossy().to_string());
-                    }
-                }
-            }
             
             #[cfg(target_os = "windows")]
             {
-                // Trên Windows: tìm trong cùng thư mục với .exe hoặc trong resources/
-                let local_ffmpeg = app_dir.join(ffmpeg_name);
-                if local_ffmpeg.exists() {
-                    return Some(local_ffmpeg.to_string_lossy().to_string());
+                // Trên Windows: ưu tiên tìm ffmpeg.exe trong các vị trí bundle
+                let search_paths = vec![
+                    app_dir.join("ffmpeg.exe"),                    // Cùng thư mục với .exe
+                    app_dir.join("resources").join("ffmpeg.exe"),  // resources/ffmpeg.exe  
+                    app_dir.join("resources").join("ffmpeg"),      // resources/ffmpeg (fallback)
+                    app_dir.join("ffmpeg"),                        // ffmpeg (fallback)
+                ];
+                
+                for search_path in search_paths {
+                    if search_path.exists() && search_path.is_file() {
+                        return Some(search_path.to_string_lossy().to_string());
+                    }
                 }
                 
-                // Tìm trong thư mục resources/ (nếu có)
-                let resources_ffmpeg = app_dir.join("resources").join(ffmpeg_name);
-                if resources_ffmpeg.exists() {
-                    return Some(resources_ffmpeg.to_string_lossy().to_string());
+                // Thử trong system PATH
+                if let Ok(output) = std::process::Command::new("ffmpeg").arg("-version").output() {
+                    if output.status.success() {
+                        return Some("ffmpeg".to_string());
+                    }
                 }
             }
             
-            // Fallback: tìm trong cùng thư mục với executable (cho dev mode và Linux)
-            let local_ffmpeg = app_dir.join(ffmpeg_name);
-            if local_ffmpeg.exists() {
-                return Some(local_ffmpeg.to_string_lossy().to_string());
-            }
-        }
-    }
-    
-    // Tìm trong system paths
-    #[cfg(target_os = "windows")]
-    {
-        // Trên Windows, thử tìm ffmpeg.exe trong PATH
-        if let Ok(_) = std::process::Command::new("ffmpeg").arg("-version").output() {
-            return Some("ffmpeg".to_string());
-        }
-    }
-    
-    #[cfg(target_os = "macos")]
-    {
-        let possible_paths = vec![
-            "/usr/local/bin/ffmpeg",
-            "/opt/homebrew/bin/ffmpeg",
-            "/usr/bin/ffmpeg",
-            "ffmpeg", // In PATH
-        ];
-        
-        for path in possible_paths {
-            if path == "ffmpeg" {
-                return Some(path.to_string());
-            }
-            if PathBuf::from(path).exists() {
-                if std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false) {
-                    return Some(path.to_string());
+            #[cfg(target_os = "macos")]
+            {
+                // Trên macOS: tìm trong bundle Resources
+                if let Some(contents_dir) = app_dir.parent() {
+                    let resources_dir = contents_dir.join("Resources");
+                    
+                    let bundled_paths = vec![
+                        resources_dir.join("resources").join("ffmpeg"),
+                        resources_dir.join("ffmpeg"),
+                    ];
+                    
+                    for path in bundled_paths {
+                        if path.exists() && path.is_file() {
+                            return Some(path.to_string_lossy().to_string());
+                        }
+                    }
+                }
+                
+                // System paths cho macOS
+                let system_paths = vec![
+                    "/usr/local/bin/ffmpeg",
+                    "/opt/homebrew/bin/ffmpeg", 
+                    "/usr/bin/ffmpeg",
+                ];
+                
+                for path in system_paths {
+                    if PathBuf::from(path).exists() {
+                        return Some(path.to_string());
+                    }
+                }
+                
+                // Test PATH
+                if let Ok(output) = std::process::Command::new("ffmpeg").arg("-version").output() {
+                    if output.status.success() {
+                        return Some("ffmpeg".to_string());
+                    }
                 }
             }
-        }
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        let possible_paths = vec![
-            "/usr/local/bin/ffmpeg",
-            "/usr/bin/ffmpeg",
-            "ffmpeg", // In PATH
-        ];
-        
-        for path in possible_paths {
-            if path == "ffmpeg" {
-                return Some(path.to_string());
-            }
-            if PathBuf::from(path).exists() {
-                if std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false) {
-                    return Some(path.to_string());
+            
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            {
+                // Linux: tìm trong cùng thư mục với executable
+                let local_ffmpeg = app_dir.join("ffmpeg");
+                if local_ffmpeg.exists() && local_ffmpeg.is_file() {
+                    return Some(local_ffmpeg.to_string_lossy().to_string());
+                }
+                
+                // System paths cho Linux
+                let system_paths = vec![
+                    "/usr/local/bin/ffmpeg",
+                    "/usr/bin/ffmpeg",
+                    "/snap/bin/ffmpeg",
+                ];
+                
+                for path in system_paths {
+                    if PathBuf::from(path).exists() {
+                        return Some(path.to_string());
+                    }
+                }
+                
+                // Test PATH
+                if let Ok(output) = std::process::Command::new("ffmpeg").arg("-version").output() {
+                    if output.status.success() {
+                        return Some("ffmpeg".to_string());
+                    }
                 }
             }
         }
@@ -341,7 +337,18 @@ pub async fn create_video_from_images(
     }
     
     let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        #[cfg(target_os = "windows")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
+        }
     })?;
     
     // Validate output folder
@@ -591,7 +598,18 @@ async fn concat_without_effects_fast(
     }
     
     let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        #[cfg(target_os = "windows")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
+        }
     })?;
     
     // Tạo file concat list
@@ -645,7 +663,18 @@ async fn merge_two_videos_with_transition(
     video2_duration: f64,
 ) -> Result<(), String> {
     let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        "Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        #[cfg(target_os = "windows")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
+        }
     })?;
     
     // Build filter_complex cho 2 video với transition
