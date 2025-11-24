@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run copy:effects && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
     "tauri:dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
-    "tauri:build": "npm run auto-download:ffmpeg && PATH=\"$HOME/.cargo/bin:$PATH\" tauri build && cd src-tauri && ./scripts/copy-resources.sh target/release/bundle/macos/YTBFlow.app resources/",
-    "tauri:build:windows": "npm run auto-download:ffmpeg && npx tauri build --bundles msi,nsis"
+    "tauri:build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
+    "tauri:build:windows": "npx tauri build --bundles msi,nsis",
+    "tauri:build:macos": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build --bundles dmg,app"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.0",

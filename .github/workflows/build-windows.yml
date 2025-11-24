@@ -69,20 +69,21 @@ jobs:
 
       - name: Prepare FFmpeg for Windows
         run: |
-          Write-Host "Auto-downloading FFmpeg for Windows build..."
+          Write-Host "Preparing FFmpeg for Windows build..."
           
-          # Use auto-download script (detects Windows automatically)
-          npm run auto-download:ffmpeg
+          # Tạo thư mục resources/window cho Windows-specific FFmpeg
+          $windowDir = "src-tauri\resources\window"
+          New-Item -ItemType Directory -Force -Path $windowDir | Out-Null
+          Write-Host "✓ Created Windows FFmpeg directory: $windowDir"
           
-          # Verify files were created
-          $resourcesDir = "src-tauri\resources"
-          $requiredFiles = @("ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe")
+          # Kiểm tra xem có file FFmpeg sẵn không
+          $requiredFiles = @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")
           $allExist = $true
           
-          Write-Host "`nVerifying FFmpeg files:"
+          Write-Host "`nChecking for existing FFmpeg files in $windowDir..."
           foreach ($file in $requiredFiles) {
-            if (Test-Path "$resourcesDir\$file") {
-              $size = (Get-Item "$resourcesDir\$file").Length
+            if (Test-Path "$windowDir\$file") {
+              $size = (Get-Item "$windowDir\$file").Length
               Write-Host "✓ $file ($('{0:N0}' -f $size) bytes)"
             } else {
               Write-Host "✗ $file missing"
@@ -91,10 +92,7 @@ jobs:
           }
           
           if (-not $allExist) {
-            Write-Host "`n⚠ Some FFmpeg files missing, attempting download fallback..."
-            
-            # Download official FFmpeg Windows essentials (static build, no dependencies)
-            Write-Host "Downloading FFmpeg Windows essentials (static build)..."
+            Write-Host "`nDownloading FFmpeg Windows essentials..."
             $ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
             $tempDir = "$env:TEMP\ffmpeg-download"
             New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
@@ -106,45 +104,62 @@ jobs:
               Expand-Archive -Path "$tempDir\ffmpeg.zip" -DestinationPath "$tempDir" -Force
               Write-Host "✓ Extracted FFmpeg archive"
               
-              # Find FFmpeg folder in extracted content
-              $ffmpegFolder = Get-ChildItem -Path $tempDir -Directory | Where-Object { $_.Name -like "*ffmpeg*" } | Select-Object -First 1
+              # Tìm FFmpeg binaries
+              $ffmpegExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+              $ffprobeExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+              $ffplayExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffplay.exe" | Select-Object -First 1
               
-              if ($ffmpegFolder) {
-                $ffmpegExe = Join-Path $ffmpegFolder.FullName "bin\ffmpeg.exe"
-                $ffprobeExe = Join-Path $ffmpegFolder.FullName "bin\ffprobe.exe"
-                
-                Write-Host "✓ Found FFmpeg binaries in: $($ffmpegFolder.Name)"
+              if ($ffmpegExe -and $ffprobeExe) {
+                # Copy vào thư mục window/
+                Copy-Item $ffmpegExe.FullName -Destination "$windowDir\ffmpeg.exe" -Force
+                Copy-Item $ffprobeExe.FullName -Destination "$windowDir\ffprobe.exe" -Force
+                if ($ffplayExe) {
+                  Copy-Item $ffplayExe.FullName -Destination "$windowDir\ffplay.exe" -Force
+                  Write-Host "✓ Copied ffmpeg.exe, ffprobe.exe, ffplay.exe to $windowDir"
+                } else {
+                  Write-Host "✓ Copied ffmpeg.exe, ffprobe.exe to $windowDir (ffplay.exe not found)"
+                }
               } else {
-                Write-Host "⚠ FFmpeg folder not found, searching recursively..."
-                $ffmpegExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-                $ffprobeExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+                throw "Could not find required FFmpeg binaries"
               }
             } catch {
-              Write-Host "⚠ Failed to download from gyan.dev, trying alternative source..."
+              Write-Host "⚠ Failed to download from gyan.dev, trying BtbN builds..."
               
-              # Fallback to BtbN builds
+              # Fallback: BtbN builds
               $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-              Invoke-WebRequest -Uri $ffmpegUrl -OutFile "$tempDir\ffmpeg.zip" -UseBasicParsing
-              Expand-Archive -Path "$tempDir\ffmpeg.zip" -DestinationPath "$tempDir" -Force
+              Invoke-WebRequest -Uri $ffmpegUrl -OutFile "$tempDir\ffmpeg-btbn.zip" -UseBasicParsing
+              Expand-Archive -Path "$tempDir\ffmpeg-btbn.zip" -DestinationPath "$tempDir" -Force
               
               $ffmpegExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
               $ffprobeExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+              $ffplayExe = Get-ChildItem -Path $tempDir -Recurse -Filter "ffplay.exe" | Select-Object -First 1
+              
+              if ($ffmpegExe -and $ffprobeExe) {
+                Copy-Item $ffmpegExe.FullName -Destination "$windowDir\ffmpeg.exe" -Force
+                Copy-Item $ffprobeExe.FullName -Destination "$windowDir\ffprobe.exe" -Force
+                if ($ffplayExe) {
+                  Copy-Item $ffplayExe.FullName -Destination "$windowDir\ffplay.exe" -Force
+                }
+                Write-Host "✓ Downloaded and copied FFmpeg from BtbN builds"
+              } else {
+                Write-Host "✗ Error: Could not find FFmpeg binaries in any source"
+                exit 1
+              }
             }
             
-            if ($ffmpegExe -and $ffprobeExe) {
-              New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
-              Copy-Item $ffmpegExe.FullName -Destination "$resourcesDir\ffmpeg.exe" -Force
-              Copy-Item $ffprobeExe.FullName -Destination "$resourcesDir\ffprobe.exe" -Force
-              Copy-Item $ffmpegExe.FullName -Destination "$resourcesDir\ffmpeg" -Force
-              Copy-Item $ffprobeExe.FullName -Destination "$resourcesDir\ffprobe" -Force
-              Write-Host "✓ Downloaded and prepared FFmpeg files"
-            } else {
-              Write-Host "✗ Error: Could not find ffmpeg.exe or ffprobe.exe in downloaded archive"
-              exit 1
-            }
-          } else {
-            Write-Host "`n✓ FFmpeg preparation completed successfully"
+            # Cleanup temp directory
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
           }
+          
+          # Verify final files
+          Write-Host "`nFinal verification:"
+          foreach ($file in $requiredFiles) {
+            if (Test-Path "$windowDir\$file") {
+              $size = (Get-Item "$windowDir\$file").Length
+              Write-Host "✓ $file ($('{0:N0}' -f $size) bytes)"
+            }
+          }
+          Write-Host "`n✓ FFmpeg preparation completed for Windows"
 
       - name: Install build tools (NSIS and WiX)
         run: |
@@ -490,18 +505,41 @@ jobs:
             }
           }
           
-          # Check if FFmpeg was available during build
-          $ffmpegExists = Test-Path "src-tauri\resources\ffmpeg.exe"
-          $ffprobeExists = Test-Path "src-tauri\resources\ffprobe.exe"
+          # Check if FFmpeg was bundled correctly for Windows
+          $windowDir = "src-tauri\resources\window"
+          $ffmpegExists = Test-Path "$windowDir\ffmpeg.exe"
+          $ffprobeExists = Test-Path "$windowDir\ffprobe.exe"
+          $ffplayExists = Test-Path "$windowDir\ffplay.exe"
           
-          if ($ffmpegExists -and $ffprobeExists) {
-            Write-Host "✓ FFmpeg files are available in resources directory"
-            Write-Host "  Note: FFmpeg bundling will be handled in application code"
+          Write-Host "`nFFmpeg bundle verification:"
+          if ($ffmpegExists) {
+            $size = (Get-Item "$windowDir\ffmpeg.exe").Length
+            Write-Host "✓ ffmpeg.exe bundled ($('{0:N0}' -f $size) bytes)"
           } else {
-            Write-Host "⚠ FFmpeg files not found in resources directory"
+            Write-Host "✗ ffmpeg.exe not found in $windowDir"
           }
           
-          Write-Host "Bundle verification completed successfully"
+          if ($ffprobeExists) {
+            $size = (Get-Item "$windowDir\ffprobe.exe").Length
+            Write-Host "✓ ffprobe.exe bundled ($('{0:N0}' -f $size) bytes)"
+          } else {
+            Write-Host "✗ ffprobe.exe not found in $windowDir"
+          }
+          
+          if ($ffplayExists) {
+            $size = (Get-Item "$windowDir\ffplay.exe").Length
+            Write-Host "✓ ffplay.exe bundled ($('{0:N0}' -f $size) bytes)"
+          } else {
+            Write-Host "⚠ ffplay.exe not found in $windowDir (optional)"
+          }
+          
+          if ($ffmpegExists -and $ffprobeExists) {
+            Write-Host "✓ FFmpeg bundling successful - Windows users won't need to install FFmpeg"
+          } else {
+            Write-Host "✗ FFmpeg bundling incomplete - users may need to install FFmpeg manually"
+          }
+          
+          Write-Host "Bundle verification completed"
         env:
           CARGO_TERM_COLOR: always
           TAURI_PRIVATE_KEY: ""

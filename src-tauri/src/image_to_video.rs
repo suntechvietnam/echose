@@ -14,10 +14,10 @@ pub fn find_ffmpeg() -> Option<String> {
             
             #[cfg(target_os = "windows")]
             {
-                // Windows: Ưu tiên tìm ffmpeg.exe trong resources/window/
+                // Windows: Tìm ffmpeg.exe trong resources/window/
                 let bundled_paths = vec![
-                    app_dir.join("resources").join("window").join("ffmpeg.exe"),  // resources/window/ffmpeg.exe (bundle)
-                    app_dir.join("ffmpeg.exe"),                                   // Cùng thư mục với .exe (fallback)
+                    app_dir.join("resources").join("window").join("ffmpeg.exe"),
+                    app_dir.join("ffmpeg.exe"), // Fallback: cùng thư mục exe
                 ];
                 
                 for path in bundled_paths {
@@ -25,27 +25,17 @@ pub fn find_ffmpeg() -> Option<String> {
                         return Some(path.to_string_lossy().to_string());
                     }
                 }
-                
-                // Fallback: FFmpeg trong system PATH
-                if let Ok(output) = std::process::Command::new("ffmpeg").arg("-version").output() {
-                    if output.status.success() {
-                        return Some("ffmpeg".to_string());
-                    }
-                }
             }
             
             #[cfg(target_os = "macos")]
             {
-                // macOS: Tìm trong app bundle Resources
+                // macOS: Tìm trong app bundle Resources/resources/mac/
                 if let Some(contents_dir) = app_dir.parent() {
                     let resources_dir = contents_dir.join("Resources");
                     
-                    // Ưu tiên tìm trong resources/mac/
                     let bundled_paths = vec![
-                        resources_dir.join("resources").join("mac").join("ffmpeg"),    // resources/mac/ffmpeg (bundle)
-                        resources_dir.join("resources").join("window").join("ffmpeg"), // resources/window/ffmpeg (fallback cross-platform)
-                        resources_dir.join("resources").join("ffmpeg"),               // resources/ffmpeg (legacy fallback)
-                        resources_dir.join("ffmpeg"),                                 // ffmpeg (legacy fallback)
+                        resources_dir.join("resources").join("mac").join("ffmpeg"),
+                        resources_dir.join("ffmpeg"), // Fallback: Resources/ffmpeg
                     ];
                     
                     for path in bundled_paths {
@@ -55,10 +45,10 @@ pub fn find_ffmpeg() -> Option<String> {
                     }
                 }
                 
-                // Fallback: System paths cho macOS
+                // macOS fallback: System paths
                 let system_paths = vec![
                     "/usr/local/bin/ffmpeg",
-                    "/opt/homebrew/bin/ffmpeg", 
+                    "/opt/homebrew/bin/ffmpeg",
                     "/usr/bin/ffmpeg",
                 ];
                 
@@ -67,16 +57,80 @@ pub fn find_ffmpeg() -> Option<String> {
                         return Some(path.to_string());
                     }
                 }
+            }
+            
+        }
+    }
+    
+    // Cuối cùng: Thử FFmpeg trong system PATH
+    if let Ok(output) = std::process::Command::new("ffmpeg").arg("-version").output() {
+        if output.status.success() {
+            return Some("ffmpeg".to_string());
+        }
+    }
+    
+    None
+}
+
+/// Tìm ffprobe (tương tự find_ffmpeg)
+pub fn find_ffprobe() -> Option<String> {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(app_dir) = exe_path.parent() {
+            
+            #[cfg(target_os = "windows")]
+            {
+                // Windows: Tìm ffprobe.exe trong resources/window/
+                let bundled_paths = vec![
+                    app_dir.join("resources").join("window").join("ffprobe.exe"),
+                    app_dir.join("ffprobe.exe"), // Fallback: cùng thư mục exe
+                ];
                 
-                // Fallback: FFmpeg trong system PATH
-                if let Ok(output) = std::process::Command::new("ffmpeg").arg("-version").output() {
-                    if output.status.success() {
-                        return Some("ffmpeg".to_string());
+                for path in bundled_paths {
+                    if path.exists() && path.is_file() {
+                        return Some(path.to_string_lossy().to_string());
                     }
                 }
             }
             
-
+            #[cfg(target_os = "macos")]
+            {
+                // macOS: Tìm trong app bundle Resources/resources/mac/
+                if let Some(contents_dir) = app_dir.parent() {
+                    let resources_dir = contents_dir.join("Resources");
+                    
+                    let bundled_paths = vec![
+                        resources_dir.join("resources").join("mac").join("ffprobe"),
+                        resources_dir.join("ffprobe"), // Fallback: Resources/ffprobe
+                    ];
+                    
+                    for path in bundled_paths {
+                        if path.exists() && path.is_file() {
+                            return Some(path.to_string_lossy().to_string());
+                        }
+                    }
+                }
+                
+                // macOS fallback: System paths
+                let system_paths = vec![
+                    "/usr/local/bin/ffprobe",
+                    "/opt/homebrew/bin/ffprobe",
+                    "/usr/bin/ffprobe",
+                ];
+                
+                for path in system_paths {
+                    if PathBuf::from(path).exists() {
+                        return Some(path.to_string());
+                    }
+                }
+            }
+            
+        }
+    }
+    
+    // Cuối cùng: Thử ffprobe trong system PATH
+    if let Ok(output) = std::process::Command::new("ffprobe").arg("-version").output() {
+        if output.status.success() {
+            return Some("ffprobe".to_string());
         }
     }
     
