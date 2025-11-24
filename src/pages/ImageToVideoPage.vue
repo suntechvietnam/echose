@@ -535,6 +535,8 @@ const createVideoFromImages = async () => {
     progress.value = 20
     statusMessage.value = '⏳ Đang tạo video từ ảnh...'
     
+    console.log('🎬 Creating video with audio files:', audioFiles.value)
+    
     const result = await callCommand('create_video_from_images', {
       imageFiles: imageFiles.value,
       imageDuration: imageDuration.value,
@@ -627,6 +629,7 @@ const openVideoFolderFromPath = async () => {
 
 // Audio handlers
 const handleAudioFilesUpdate = (files) => {
+  console.log('🎵 Audio files updated:', files)
   audioFiles.value = files
 }
 
@@ -642,6 +645,7 @@ const handleAudioCleared = () => {
 
 const handleImageError = (event) => {
   // Handle error when effect preview image fails to load
+  console.warn('Failed to load effect preview image:', event.target.src)
   // Optionally hide the image or show a placeholder
   event.target.style.display = 'none'
 }
