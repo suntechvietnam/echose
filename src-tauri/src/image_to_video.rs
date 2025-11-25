@@ -966,6 +966,7 @@ async fn merge_video_with_audio(
     
     // Build ffmpeg command để merge video với audio
     // Sử dụng -stream_loop -1 để loop video cho đến hết audio
+    // -filter_complex với setpts để điều chỉnh tốc độ video khi loop
     // -shortest để đảm bảo output dừng khi audio kết thúc
     let mut cmd = tokio::process::Command::new(&ffmpeg_path);
     cmd.arg("-stream_loop")
@@ -974,17 +975,25 @@ async fn merge_video_with_audio(
         .arg(video_path)
         .arg("-i")
         .arg(audio_path)
-        .arg("-c:v")
-        .arg("copy") // Copy video stream - nhanh nhất
-        .arg("-c:a")
-        .arg("aac") // Encode audio thành AAC (video có thể không có audio stream)
-        .arg("-b:a")
-        .arg("256k") // Bitrate audio 256kbps cho chất lượng cao nhất
+        .arg("-filter_complex")
+        .arg("[0:v]setpts=N/FRAME_RATE/TB[v]") // Điều chỉnh timestamp để video loop mượt mà
         .arg("-map")
-        .arg("0:v:0") // Video từ input 0
+        .arg("[v]") // Map video từ filter output
         .arg("-map")
         .arg("1:a:0") // Audio từ input 1
         .arg("-shortest") // Dừng khi stream ngắn nhất (audio) kết thúc
+        .arg("-c:v")
+        .arg("libx264") // Encode video với libx264
+        .arg("-crf")
+        .arg("23") // CRF 23 cho chất lượng tốt
+        .arg("-preset")
+        .arg("veryfast") // Preset veryfast để xử lý nhanh
+        .arg("-c:a")
+        .arg("aac") // Encode audio thành AAC
+        .arg("-b:a")
+        .arg("256k") // Bitrate audio 256kbps cho chất lượng cao nhất
+        .arg("-movflags")
+        .arg("+faststart") // Fast start để stream tốt hơn
         .arg("-avoid_negative_ts")
         .arg("make_zero") // Tránh lỗi timestamp âm
         .arg("-y")
