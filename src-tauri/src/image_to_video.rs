@@ -1,5 +1,6 @@
 use crate::process::ProcessStore;
 use crate::file_audio::get_audio_duration;
+use crate::utils::find_ffmpeg_by_os::{find_ffmpeg_or_error, run_ffmpeg};
 use std::path::PathBuf;
 use std::fs;
 use std::io::Write;
@@ -8,70 +9,6 @@ use tokio::sync::Semaphore;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
-
-pub fn find_ffmpeg() -> Option<String> {
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(app_dir) = exe_path.parent() {
-            
-            #[cfg(target_os = "windows")]
-            {
-                // Windows: Tìm ffmpeg.exe trong resources/window/
-                let bundled_paths = vec![
-                    app_dir.join("resources").join("window").join("ffmpeg.exe"),
-                    app_dir.join("ffmpeg.exe"), // Fallback: cùng thư mục exe
-                ];
-                
-                for path in bundled_paths {
-                    if path.exists() && path.is_file() {
-                        return Some(path.to_string_lossy().to_string());
-                    }
-                }
-            }
-            
-            #[cfg(target_os = "macos")]
-            {
-                // macOS: Tìm trong app bundle Resources/resources/mac/
-                if let Some(contents_dir) = app_dir.parent() {
-                    let resources_dir = contents_dir.join("Resources");
-                    
-                    let bundled_paths = vec![
-                        resources_dir.join("resources").join("mac").join("ffmpeg"),
-                        resources_dir.join("ffmpeg"), // Fallback: Resources/ffmpeg
-                    ];
-                    
-                    for path in bundled_paths {
-                        if path.exists() && path.is_file() {
-                            return Some(path.to_string_lossy().to_string());
-                        }
-                    }
-                }
-                
-                // macOS fallback: System paths
-                let system_paths = vec![
-                    "/usr/local/bin/ffmpeg",
-                    "/opt/homebrew/bin/ffmpeg",
-                    "/usr/bin/ffmpeg",
-                ];
-                
-                for path in system_paths {
-                    if PathBuf::from(path).exists() {
-                        return Some(path.to_string());
-                    }
-                }
-            }
-            
-        }
-    }
-    
-    // Cuối cùng: Thử FFmpeg trong system PATH
-    if let Ok(output) = std::process::Command::new("ffmpeg").arg("-version").output() {
-        if output.status.success() {
-            return Some("ffmpeg".to_string());
-        }
-    }
-    
-    None
-}
 
 /// Trait để định nghĩa cách build filter cho từng image effect
 trait ImageEffect {
@@ -300,20 +237,7 @@ pub async fn create_video_from_images(
         return Err("Khoảng cách giữa các ảnh phải tối thiểu 5 giây".to_string());
     }
     
-    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        #[cfg(target_os = "windows")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
-        }
-        #[cfg(target_os = "macos")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
-        }
-        #[cfg(target_os = "linux")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
-        }
-    })?;
+    let ffmpeg_path = find_ffmpeg_or_error()?;
     
     // Validate output folder
     let output_path = PathBuf::from(&output_folder);
@@ -614,21 +538,6 @@ async fn concat_without_effects_fast(
         return Ok(());
     }
     
-    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        #[cfg(target_os = "windows")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
-        }
-        #[cfg(target_os = "macos")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
-        }
-        #[cfg(target_os = "linux")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
-        }
-    })?;
-    
     // Tạo file concat list
     let output_path_buf = PathBuf::from(output_path);
     let work_dir = output_path_buf.parent()
@@ -637,7 +546,7 @@ async fn concat_without_effects_fast(
     let concat_list_file = create_concat_list_file(&segment_files, &work_dir.to_path_buf())?;
     
     // Build ffmpeg command với concat demuxer
-    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    let mut cmd = run_ffmpeg()?;
     cmd.arg("-f")
         .arg("concat")
         .arg("-safe")
@@ -678,21 +587,6 @@ async fn merge_two_videos_with_transition(
     video1_duration: f64,
     video2_duration: f64,
 ) -> Result<(), String> {
-    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        #[cfg(target_os = "windows")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
-        }
-        #[cfg(target_os = "macos")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
-        }
-        #[cfg(target_os = "linux")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
-        }
-    })?;
-    
     // Build filter_complex cho 2 video với transition
     // Offset = duration của video1 - transition_duration
     let offset = video1_duration - transition_duration;
@@ -706,7 +600,7 @@ async fn merge_two_videos_with_transition(
     let total_duration = video1_duration + video2_duration - transition_duration;
     
     // Build ffmpeg command
-    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    let mut cmd = run_ffmpeg()?;
     cmd.arg("-i")
         .arg(video1_path)
         .arg("-i")
@@ -894,21 +788,6 @@ async fn merge_audio_files(
         return Ok(());
     }
     
-    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        #[cfg(target_os = "windows")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
-        }
-        #[cfg(target_os = "macos")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
-        }
-        #[cfg(target_os = "linux")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
-        }
-    })?;
-    
     // Tạo file concat list cho audio
     let output_path_buf = PathBuf::from(output_audio_path);
     let work_dir = output_path_buf.parent()
@@ -917,7 +796,7 @@ async fn merge_audio_files(
     let audio_concat_list_file = create_concat_list_file(&audio_files, &work_dir.to_path_buf())?;
     
     // Build ffmpeg command để merge audio
-    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    let mut cmd = run_ffmpeg()?;
     cmd.arg("-f")
         .arg("concat")
         .arg("-safe")
@@ -953,26 +832,11 @@ async fn merge_video_with_audio(
     audio_path: &str,
     output_path: &str,
 ) -> Result<(), String> {
-    let ffmpeg_path = find_ffmpeg().ok_or_else(|| {
-        #[cfg(target_os = "windows")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng tải lại ứng dụng hoặc liên hệ hỗ trợ.".to_string()
-        }
-        #[cfg(target_os = "macos")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: brew install ffmpeg".to_string()
-        }
-        #[cfg(target_os = "linux")]
-        {
-            "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt: sudo apt install ffmpeg".to_string()
-        }
-    })?;
-    
     // Lấy duration của audio file
     let audio_duration = get_audio_duration(audio_path.to_string()).await
         .map_err(|e| format!("Lỗi khi đọc duration của audio: {}", e))?;
     
-    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+    let mut cmd = run_ffmpeg()?;
 
     cmd.arg("-stream_loop")
         .arg("-1") // Loop video vô hạn

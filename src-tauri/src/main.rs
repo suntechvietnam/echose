@@ -5,6 +5,7 @@ mod file_audio;
 mod filesystem;
 mod image_to_video;
 mod process;
+mod utils;
 
 use process::ProcessStore;
 use std::sync::Arc;

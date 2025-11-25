@@ -254,8 +254,8 @@ const imageDuration = ref(6)
 const durationOptions = [5, 6, 7, 8, 10, 12, 15, 20, 30]
 const videoQuality = ref('fullhd')
 const videoAspectRatio = ref('16:9') // Default: 16:9 (Video dài)
-const videoEffectType = ref('none')
-const imageEffectType = ref('none')
+const videoEffectType = ref('diagtl')
+const imageEffectType = ref('zoom-in')
 
 const imageEffectOptions = [
   { name: 'Không có', value: 'none' },
