@@ -18,6 +18,17 @@
             <span class="menu-text">Tạo video từ ảnh</span>
           </a>
         </li>
+        <li>
+          <a 
+            href="#" 
+            class="menu-item" 
+            :class="{ active: currentPage === 'audio-to-text' }"
+            @click.prevent="handleClick('audio-to-text')"
+          >
+            <span class="menu-icon">📝</span>
+            <span class="menu-text">Audio / Video to text</span>
+          </a>
+        </li>
       </ul>
     </nav>
   </aside>

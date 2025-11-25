@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio_to_text;
 mod file_audio;
 mod filesystem;
 mod image_to_video;
@@ -25,6 +26,8 @@ fn main() {
             image_to_video::stop_image_video_creation,
             // Audio utilities - có thể dùng chung
             file_audio::get_audio_duration,
+            // Audio to text - chuyển audio/video sang ASS
+            audio_to_text::convert_audio_to_ass,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
