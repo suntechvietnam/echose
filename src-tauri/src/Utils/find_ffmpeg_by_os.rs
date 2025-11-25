@@ -11,14 +11,16 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// * `Err(String)` - Thông báo lỗi phù hợp theo từng OS
 pub fn run_ffmpeg() -> Result<tokio::process::Command, String> {
     let ffmpeg_path = find_ffmpeg_or_error()?;
-    let mut cmd = tokio::process::Command::new(&ffmpeg_path);
     
     #[cfg(target_os = "windows")]
     {
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        Ok(tokio::process::Command::new(&ffmpeg_path).creation_flags(CREATE_NO_WINDOW))
     }
     
-    Ok(cmd)
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(tokio::process::Command::new(&ffmpeg_path))
+    }
 }
 
 /// Tìm đường dẫn đến FFmpeg executable theo từng OS
