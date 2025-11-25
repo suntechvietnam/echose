@@ -108,13 +108,10 @@ pub fn find_ffprobe() -> Option<String> {
 }
 
 /// Đọc duration của file audio bằng ffprobe (nhanh hơn JavaScript)
-/// 
 /// Sử dụng ffprobe để đọc metadata mà không cần decode toàn bộ file,
 /// nhanh hơn nhiều so với đọc file vào memory trong JavaScript.
-/// 
 /// # Arguments
 /// * `file_path` - Đường dẫn đến file audio (MP3, WAV, M4A, AAC, OGG, etc.)
-/// 
 /// # Returns
 /// * `Ok(f64)` - Duration tính bằng giây
 /// * `Err(String)` - Lỗi nếu không thể đọc duration

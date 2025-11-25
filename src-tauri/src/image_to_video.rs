@@ -1,4 +1,5 @@
 use crate::process::ProcessStore;
+use crate::file_audio::get_audio_duration;
 use std::path::PathBuf;
 use std::fs;
 use std::io::Write;
@@ -71,6 +72,7 @@ pub fn find_ffmpeg() -> Option<String> {
     
     None
 }
+
 /// Trait để định nghĩa cách build filter cho từng image effect
 trait ImageEffect {
     /// Build filter string cho effect này
@@ -107,7 +109,7 @@ fn build_base_scale(width: i32, height: i32) -> String {
 // Image Effect Implementations
 // ============================================================================
 
-/// Không có hiệu ứng
+// Không có hiệu ứng
 struct NoneEffect;
 
 impl ImageEffect for NoneEffect {
@@ -117,7 +119,7 @@ impl ImageEffect for NoneEffect {
     }
 }
 
-/// Zoom In effect
+// Zoom In effect
 struct ZoomInEffect;
 
 impl ImageEffect for ZoomInEffect {
@@ -129,7 +131,7 @@ impl ImageEffect for ZoomInEffect {
     }
 }
 
-/// Zoom Out effect
+// Zoom Out effect
 struct ZoomOutEffect;
 
 impl ImageEffect for ZoomOutEffect {
@@ -141,7 +143,7 @@ impl ImageEffect for ZoomOutEffect {
     }
 }
 
-/// Fade In effect
+// Fade In effect
 struct FadeInEffect;
 
 impl ImageEffect for FadeInEffect {
@@ -151,7 +153,7 @@ impl ImageEffect for FadeInEffect {
     }
 }
 
-/// Fade Out effect
+// Fade Out effect
 struct FadeOutEffect;
 
 impl ImageEffect for FadeOutEffect {
@@ -163,7 +165,7 @@ impl ImageEffect for FadeOutEffect {
     }
 }
 
-/// Pan effect
+// Pan effect
 struct PanEffect;
 
 impl ImageEffect for PanEffect {
@@ -174,7 +176,7 @@ impl ImageEffect for PanEffect {
     }
 }
 
-/// Factory function để tạo effect instance từ string
+// Factory function để tạo effect instance từ string
 fn create_image_effect(effect_type: &str) -> Box<dyn ImageEffect> {
     match effect_type {
         "none" => Box::new(NoneEffect),
@@ -204,6 +206,7 @@ fn build_image_filter_string(
         _index: index,
         video_quality: video_quality.to_string(),
     };
+
     effect.build_filter(&params)
 }
 
@@ -943,6 +946,7 @@ async fn merge_audio_files(
 
 /**
  * Merge video với audio, đảm bảo video loop để match với audio duration
+ * Sử dụng -c:v copy để copy video stream trực tiếp (không re-encode), nhanh hơn nhiều
  */
 async fn merge_video_with_audio(
     video_path: &str,
@@ -964,38 +968,28 @@ async fn merge_video_with_audio(
         }
     })?;
     
-    // Build ffmpeg command để merge video với audio
-    // Sử dụng -stream_loop -1 để loop video cho đến hết audio
-    // -filter_complex với setpts để điều chỉnh tốc độ video khi loop
-    // -shortest để đảm bảo output dừng khi audio kết thúc
+    // Lấy duration của audio file
+    let audio_duration = get_audio_duration(audio_path.to_string()).await
+        .map_err(|e| format!("Lỗi khi đọc duration của audio: {}", e))?;
+    
     let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+
     cmd.arg("-stream_loop")
         .arg("-1") // Loop video vô hạn
         .arg("-i")
         .arg(video_path)
         .arg("-i")
         .arg(audio_path)
-        .arg("-filter_complex")
-        .arg("[0:v]setpts=N/FRAME_RATE/TB[v]") // Điều chỉnh timestamp để video loop mượt mà
-        .arg("-map")
-        .arg("[v]") // Map video từ filter output
-        .arg("-map")
-        .arg("1:a:0") // Audio từ input 1
-        .arg("-shortest") // Dừng khi stream ngắn nhất (audio) kết thúc
+        .arg("-t")
+        .arg(format!("{:.2}", audio_duration)) // Giới hạn output theo duration của audio
         .arg("-c:v")
-        .arg("libx264") // Encode video với libx264
-        .arg("-crf")
-        .arg("23") // CRF 23 cho chất lượng tốt
-        .arg("-preset")
-        .arg("veryfast") // Preset veryfast để xử lý nhanh
+        .arg("copy") // Copy video stream trực tiếp - không re-encode, nhanh hơn nhiều
         .arg("-c:a")
         .arg("aac") // Encode audio thành AAC
         .arg("-b:a")
         .arg("256k") // Bitrate audio 256kbps cho chất lượng cao nhất
         .arg("-movflags")
         .arg("+faststart") // Fast start để stream tốt hơn
-        .arg("-avoid_negative_ts")
-        .arg("make_zero") // Tránh lỗi timestamp âm
         .arg("-y")
         .arg(output_path);
     
