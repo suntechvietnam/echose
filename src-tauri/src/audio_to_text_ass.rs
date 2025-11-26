@@ -137,6 +137,24 @@ impl Default for AssExportConfig {
     }
 }
 
+/// Cấu hình cho việc chia nhỏ segments
+#[derive(Debug, Clone)]
+pub struct SplitConfig {
+    pub max_words_per_segment: usize,  // Số từ tối đa mỗi segment
+    pub min_segment_duration: f64,     // Thời gian tối thiểu mỗi segment (giây)
+    pub enable_splitting: bool,        // Bật/tắt tính năng chia segment
+}
+
+impl Default for SplitConfig {
+    fn default() -> Self {
+        Self {
+            max_words_per_segment: 6,  // 6 từ per segment
+            min_segment_duration: 1.0, // Ít nhất 1 giây
+            enable_splitting: true,    // Mặc định bật
+        }
+    }
+}
+
 impl AssExportConfig {
     /// Tạo config từ các tham số option strings
     pub fn from_options(
@@ -175,6 +193,70 @@ impl AssExportConfig {
         
         config
     }
+}
+
+/// Chia segment thành các segment nhỏ hơn theo số từ
+fn split_segment_by_words(segment: &TranscriptSegment, config: &SplitConfig) -> Vec<TranscriptSegment> {
+    if !config.enable_splitting {
+        return vec![segment.clone()];
+    }
+    
+    let words: Vec<&str> = segment.text.split_whitespace().collect();
+    
+    // Nếu số từ <= max, không cần chia
+    if words.len() <= config.max_words_per_segment {
+        return vec![segment.clone()];
+    }
+    
+    let mut result = Vec::new();
+    let total_duration = segment.end - segment.start;
+    let word_count = words.len();
+    
+    // Chia đều thời gian cho mỗi từ
+    let duration_per_word = total_duration / word_count as f64;
+    
+    let mut current_start = segment.start;
+    
+    for chunk in words.chunks(config.max_words_per_segment) {
+        let chunk_word_count = chunk.len();
+        let chunk_duration = (chunk_word_count as f64 * duration_per_word)
+            .max(config.min_segment_duration); // Đảm bảo thời gian tối thiểu
+        
+        let chunk_end = (current_start + chunk_duration).min(segment.end);
+        let chunk_text = chunk.join(" ");
+        
+        result.push(TranscriptSegment {
+            start: current_start,
+            end: chunk_end,
+            text: chunk_text,
+        });
+        
+        current_start = chunk_end;
+        
+        // Nếu đã đến cuối segment gốc, dừng
+        if current_start >= segment.end {
+            break;
+        }
+    }
+    
+    // Điều chỉnh segment cuối để kết thúc đúng lúc
+    if let Some(last_segment) = result.last_mut() {
+        last_segment.end = segment.end;
+    }
+    
+    result
+}
+
+/// Áp dụng splitting cho tất cả segments
+fn apply_segment_splitting(segments: &[TranscriptSegment], config: &SplitConfig) -> Vec<TranscriptSegment> {
+    let mut result = Vec::new();
+    
+    for segment in segments {
+        let split_segments = split_segment_by_words(segment, config);
+        result.extend(split_segments);
+    }
+    
+    result
 }
 
 /// Tìm đường dẫn đến Whisper model
@@ -351,6 +433,12 @@ pub fn audio_to_ass(
             .unwrap_or_else(|| "audio_caption.ass".to_string())
     });
 
+    // Áp dụng segment splitting (chia nhỏ theo số từ)
+    let split_config = SplitConfig::default();
+    let final_segments = apply_segment_splitting(&segments, &split_config);
+    
+    println!("🔀 Segment splitting: {} -> {} segments", segments.len(), final_segments.len());
+    
     // Tạo cấu hình ASS export
     let ass_config = AssExportConfig::from_options(
         Some(lang),
@@ -362,7 +450,7 @@ pub fn audio_to_ass(
     );
     
     // Xuất ASS với timestamps chính xác
-    export_segments_to_ass_file(&segments, &ass_config, &final_output)?;
+    export_segments_to_ass_file(&final_segments, &ass_config, &final_output)?;
 
     println!("🎉 HOÀN TẤT! File ASS đã tạo:");
     println!("→ {}", final_output);
