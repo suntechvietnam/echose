@@ -1,6 +1,6 @@
 use crate::process::ProcessStore;
-use crate::file_audio::get_audio_duration;
 use crate::utils::find_ffmpeg_by_os::{find_ffmpeg_or_error, run_ffmpeg};
+use crate::utils::merge_audio_to_video::{merge_audio_without_caption, merge_audio_with_caption};
 use std::path::PathBuf;
 use std::fs;
 use std::io::Write;
@@ -439,6 +439,7 @@ pub async fn create_video_from_images(
             &final_video_path,
             &merged_audio_path,
             &final_with_audio_path_str,
+            true, // has_caption = true by default
         ).await.map_err(|e| format!("Lỗi khi merge video với audio: {}", e))?;
         
         // Xóa file audio tạm nếu đã merge nhiều file
@@ -824,47 +825,21 @@ async fn merge_audio_files(
 }
 
 /**
- * Merge video với audio, đảm bảo video loop để match với audio duration
- * Sử dụng -c:v copy để copy video stream trực tiếp (không re-encode), nhanh hơn nhiều
+ * Merge video với audio, với tùy chọn thêm caption
+ * has_caption: true = merge cả audio và caption, false = chỉ merge audio
  */
 async fn merge_video_with_audio(
     video_path: &str,
     audio_path: &str,
     output_path: &str,
+    has_caption: bool,
 ) -> Result<(), String> {
-    // Lấy duration của audio file
-    let audio_duration = get_audio_duration(audio_path.to_string()).await
-        .map_err(|e| format!("Lỗi khi đọc duration của audio: {}", e))?;
-    
-    let mut cmd = run_ffmpeg()?;
-
-    cmd.arg("-stream_loop")
-        .arg("-1") // Loop video vô hạn
-        .arg("-i")
-        .arg(video_path)
-        .arg("-i")
-        .arg(audio_path)
-        .arg("-t")
-        .arg(format!("{:.2}", audio_duration)) // Giới hạn output theo duration của audio
-        .arg("-c:v")
-        .arg("copy") // Copy video stream trực tiếp - không re-encode, nhanh hơn nhiều
-        .arg("-c:a")
-        .arg("aac") // Encode audio thành AAC
-        .arg("-b:a")
-        .arg("256k") // Bitrate audio 256kbps cho chất lượng cao nhất
-        .arg("-movflags")
-        .arg("+faststart") // Fast start để stream tốt hơn
-        .arg("-y")
-        .arg(output_path);
-    
-    // Chạy và đợi process hoàn thành
-    let output = cmd.output().await
-        .map_err(|e| format!("Lỗi khi merge video với audio: {}", e))?;
-    
-    if !output.status.success() {
-        let error_msg = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Lỗi khi merge video với audio: {}", error_msg));
+    if has_caption {
+        // Merge video với audio và caption
+        merge_audio_with_caption(video_path, audio_path, output_path).await
+    } else {
+        // Chỉ merge video với audio
+        merge_audio_without_caption(video_path, audio_path, output_path).await
     }
-    Ok(())
 }
 
