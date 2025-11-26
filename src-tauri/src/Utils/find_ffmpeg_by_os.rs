@@ -1,9 +1,10 @@
 use std::path::PathBuf;
+use std::process::Command;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Tạo và trả về một tokio::process::Command đã được setup với ffmpeg_path
+/// Tạo và trả về một tokio::process::Command đã được setup với ffmpeg_path (async)
 /// Tự động tìm ffmpeg path và trả về lỗi nếu không tìm thấy
 /// Trên Windows, tự động thêm CREATE_NO_WINDOW flag để ẩn console window
 /// # Returns
@@ -20,6 +21,29 @@ pub fn run_ffmpeg() -> Result<tokio::process::Command, String> {
     #[cfg(not(target_os = "windows"))]
     {
         Ok(tokio::process::Command::new(&ffmpeg_path))
+    }
+}
+
+/// Tạo và trả về một std::process::Command đã được setup với ffmpeg_path (sync)
+/// Dùng cho các context không async
+/// Trên Windows, tự động thêm CREATE_NO_WINDOW flag để ẩn console window
+/// # Returns
+/// * `Ok(std::process::Command)` - Command đã được setup với ffmpeg path
+/// * `Err(String)` - Thông báo lỗi phù hợp theo từng OS
+pub fn run_ffmpeg_sync() -> Result<Command, String> {
+    let ffmpeg_path = find_ffmpeg_or_error()?;
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = Command::new(&ffmpeg_path);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        Ok(cmd)
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Command::new(&ffmpeg_path))
     }
 }
 

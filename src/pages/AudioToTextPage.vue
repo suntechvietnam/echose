@@ -120,9 +120,9 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
-import { open } from '@tauri-apps/api/dialog'
+import { open, save } from '@tauri-apps/api/dialog'
 import { invoke } from '@tauri-apps/api/tauri'
-import { readTextFile } from '@tauri-apps/api/fs'
+import { readTextFile, writeTextFile } from '@tauri-apps/api/fs'
 import { useAudioDuration } from '@/composables/useAudioDuration'
 import '../assets/css/image-to-video.css'
 import '../assets/css/audio-to-text.css'
@@ -316,10 +316,36 @@ const copyToClipboard = async () => {
 const downloadText = async () => {
   if (!convertedText.value) return
   
-  // TODO: Implement download logic using Tauri's save dialog
-  statusMessage.value = 'Chức năng tải xuống sẽ được triển khai sau...'
-  statusType.value = 'info'
-  console.log('Download text:', convertedText.value)
+  try {
+    // Tạo tên file mặc định từ file input
+    let defaultName = 'caption.ass'
+    if (mediaFile.value) {
+      const inputName = getFileName(mediaFile.value)
+      const baseName = inputName.replace(/\.[^/.]+$/, '') // Bỏ extension
+      defaultName = `${baseName}_caption.ass`
+    }
+    
+    // Mở dialog để chọn nơi lưu file
+    const savePath = await save({
+      defaultPath: defaultName,
+      filters: [
+        { name: 'ASS Subtitle', extensions: ['ass'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+    
+    if (savePath) {
+      // Ghi nội dung vào file
+      await writeTextFile(savePath, convertedText.value)
+      
+      statusMessage.value = `✅ Đã lưu file thành công: ${savePath}`
+      statusType.value = 'success'
+    }
+  } catch (error) {
+    console.error('Lỗi khi lưu file:', error)
+    statusMessage.value = `❌ Lỗi khi lưu file: ${error}`
+    statusType.value = 'error'
+  }
 }
 
 </script>
