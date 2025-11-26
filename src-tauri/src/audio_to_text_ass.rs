@@ -17,6 +17,7 @@ pub struct TranscriptSegment {
 pub enum CaptionPosition {
     Top,
     Center,
+    CenterBottom,  // Nằm giữa Center và Bottom
     Bottom,
 }
 
@@ -25,17 +26,19 @@ impl CaptionPosition {
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "top" => CaptionPosition::Top,
+            "centerbottom" | "center-bottom" | "center_bottom" => CaptionPosition::CenterBottom,
             "bottom" => CaptionPosition::Bottom,
             _ => CaptionPosition::Center,
         }
     }
     
     /// Trả về ASS Alignment value
-    /// Top: 8, Center: 5, Bottom: 2
+    /// Top: 8, Center: 5, CenterBottom: 2, Bottom: 2
     pub fn to_alignment(&self) -> u8 {
         match self {
             CaptionPosition::Top => 8,
             CaptionPosition::Center => 5,
+            CaptionPosition::CenterBottom => 2,  // Cùng alignment với Bottom
             CaptionPosition::Bottom => 2,
         }
     }
@@ -76,8 +79,8 @@ impl VideoFormat {
     /// Trả về margin left/right
     pub fn margin_lr(&self) -> u32 {
         match self {
-            VideoFormat::Landscape => 10,
-            VideoFormat::Portrait => 40,  // Margin rộng hơn cho màn dọc
+            VideoFormat::Landscape => 200,  // Margin lớn hơn để block caption nhỏ và căn giữa
+            VideoFormat::Portrait => 80,   // Margin vừa phải cho màn dọc
         }
     }
     
@@ -103,7 +106,7 @@ impl Default for AssColorConfig {
         Self {
             text_color: "FFFFFF".to_string(),   // Trắng
             border_color: "000000".to_string(), // Đen
-            highlight_color: "00FFFF".to_string(), // Cyan
+            highlight_color: "FFFF00".to_string(), // Vàng
         }
     }
 }
@@ -124,7 +127,7 @@ impl Default for AssExportConfig {
     fn default() -> Self {
         Self {
             language: "en".to_string(),
-            position: CaptionPosition::Center,
+            position: CaptionPosition::CenterBottom,
             video_format: VideoFormat::Landscape,
             colors: AssColorConfig::default(),
             enable_karaoke: true,
@@ -511,6 +514,8 @@ fn generate_ass_header(config: &AssExportConfig) -> Result<String> {
         (CaptionPosition::Top, VideoFormat::Landscape) => 50,
         (CaptionPosition::Top, VideoFormat::Portrait) => 80,
         (CaptionPosition::Center, _) => 10,
+        (CaptionPosition::CenterBottom, VideoFormat::Landscape) => 40,  // Nằm giữa Center(10) và Bottom(80)
+        (CaptionPosition::CenterBottom, VideoFormat::Portrait) => 100,  // Nằm giữa Center(10) và Bottom(150)
         (CaptionPosition::Bottom, VideoFormat::Landscape) => 80,
         (CaptionPosition::Bottom, VideoFormat::Portrait) => 150,
     };
@@ -760,6 +765,8 @@ mod tests {
     fn test_caption_position() {
         assert_eq!(CaptionPosition::from_str("top").to_alignment(), 8);
         assert_eq!(CaptionPosition::from_str("center").to_alignment(), 5);
+        assert_eq!(CaptionPosition::from_str("centerbottom").to_alignment(), 2);
+        assert_eq!(CaptionPosition::from_str("center-bottom").to_alignment(), 2);
         assert_eq!(CaptionPosition::from_str("bottom").to_alignment(), 2);
         assert_eq!(CaptionPosition::from_str("invalid").to_alignment(), 5); // Default center
     }
