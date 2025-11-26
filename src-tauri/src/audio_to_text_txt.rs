@@ -307,14 +307,11 @@ pub fn audio_to_txt(
             .unwrap_or_else(|| "audio_transcript.txt".to_string())
     });
 
-    // Áp dụng segment splitting (chia nhỏ theo số từ)
-    let split_config = SplitConfig::default();
-    let final_segments = apply_segment_splitting(&segments, &split_config);
+    // Không áp dụng segment splitting cho TXT - giữ nguyên segments gốc từ Whisper
+    println!("📝 Converting {} segments to plain text format", segments.len());
     
-    println!("🔀 Segment splitting: {} -> {} segments", segments.len(), final_segments.len());
-    
-    // Xuất TXT với nội dung văn bản thuần túy
-    export_segments_to_txt_file(&final_segments, &final_output)?;
+    // Xuất TXT với nội dung văn bản thuần túy (theo câu)
+    export_segments_to_txt_file(&segments, &final_output)?;
 
     println!("🎉 HOÀN TẤT! File TXT đã tạo:");
     println!("→ {}", final_output);
@@ -400,25 +397,57 @@ fn ensure_wav_format(input_path: &str) -> Result<String> {
     }
 }
 
-/// Chuyển đổi segments thành nội dung TXT file (văn bản thuần túy)
-pub fn segments_to_txt_content(segments: &[TranscriptSegment]) -> String {
-    let mut content = String::new();
+/// Combine tất cả segments thành văn bản liền mạch
+fn combine_segments_to_text(segments: &[TranscriptSegment]) -> String {
+    let mut combined_text = String::new();
     
-    for (i, segment) in segments.iter().enumerate() {
-        if segment.text.trim().is_empty() {
-            continue;
-        }
-        
-        // Thêm text của segment
-        content.push_str(&segment.text);
-        
-        // Thêm xuống dòng giữa các segments (trừ segment cuối)
-        if i < segments.len() - 1 {
-            content.push('\n');
+    for segment in segments {
+        let text = segment.text.trim();
+        if !text.is_empty() {
+            // Thêm khoảng trắng nếu không phải segment đầu tiên
+            if !combined_text.is_empty() && !combined_text.ends_with(' ') {
+                combined_text.push(' ');
+            }
+            combined_text.push_str(text);
         }
     }
     
-    content
+    combined_text
+}
+
+/// Chia văn bản thành các câu dựa vào dấu chấm và format thành đoạn văn
+fn format_text_into_sentences(text: &str) -> String {
+    let mut formatted = String::new();
+    
+    // Chia theo dấu chấm (.)
+    let sentences: Vec<&str> = text.split('.')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    
+    for (i, sentence) in sentences.iter().enumerate() {
+        // Thêm câu và dấu chấm
+        formatted.push_str(sentence);
+        if !sentence.ends_with(&['.', '!', '?'][..]) {
+            formatted.push('.');
+        }
+        
+        // Thêm xuống dòng giữa các câu (trừ câu cuối)
+        if i < sentences.len() - 1 {
+            formatted.push('\n');
+        }
+    }
+    
+    formatted
+}
+
+/// Chuyển đổi segments thành nội dung TXT file (văn bản thuần túy theo câu)
+pub fn segments_to_txt_content(segments: &[TranscriptSegment]) -> String {
+    // Bước 1: Combine tất cả segments thành văn bản liền mạch
+    let combined_text = combine_segments_to_text(segments);
+    
+    // Bước 2: Format thành các câu, mỗi câu một dòng
+    format_text_into_sentences(&combined_text)
 }
 
 /// Xuất TXT file với nội dung văn bản thuần túy
@@ -486,17 +515,25 @@ mod tests {
             TranscriptSegment {
                 start: 0.0,
                 end: 2.0,
-                text: "Hello world".to_string(),
+                text: "Hello world. This is a test".to_string(),
             },
             TranscriptSegment {
                 start: 2.0,
                 end: 4.0,
-                text: "This is a test".to_string(),
+                text: "Another sentence here".to_string(),
             },
         ];
         
         let content = segments_to_txt_content(&segments);
-        assert_eq!(content, "Hello world\nThis is a test");
+        // Kỳ vọng: mỗi câu một dòng, dựa vào dấu chấm
+        assert_eq!(content, "Hello world.\nThis is a test.\nAnother sentence here.");
+    }
+
+    #[test]
+    fn test_format_text_into_sentences() {
+        let text = "This is first sentence. This is second sentence. Final sentence";
+        let result = format_text_into_sentences(text);
+        assert_eq!(result, "This is first sentence.\nThis is second sentence.\nFinal sentence.");
     }
 
     #[test]
