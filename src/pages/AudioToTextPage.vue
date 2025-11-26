@@ -98,14 +98,11 @@
           <div class="form-actions">
             <button 
               class="btn-create-video" 
-              :disabled="!mediaFile || isConverting || outputFormat !== 'ass'"
+              :disabled="!mediaFile || isConverting"
               @click="handleConvert"
             >
-              {{ isConverting ? 'Đang chuyển đổi...' : 'Chuyển đổi sang ASS' }}
+              {{ isConverting ? 'Đang chuyển đổi...' : `Chuyển đổi sang ${outputFormat.toUpperCase()}` }}
             </button>
-            <div v-if="outputFormat !== 'ass'" class="format-notice">
-              ⚠️ Hiện tại chỉ hỗ trợ định dạng ASS
-            </div>
           </div>
 
           <!-- Status message -->
@@ -124,8 +121,8 @@ import { open, save } from '@tauri-apps/api/dialog'
 import { invoke } from '@tauri-apps/api/tauri'
 import { readTextFile, writeTextFile } from '@tauri-apps/api/fs'
 import { useAudioDuration } from '@/composables/useAudioDuration'
-import '../assets/css/image-to-video.css'
-import '../assets/css/audio-to-text.css'
+import '@/assets/css/image-to-video.css'
+import '@/assets/css/audio-to-text.css'
 
 // Media file (single file only)
 const mediaFile = ref(null)
@@ -162,8 +159,6 @@ const outputFormats = [
   { value: 'txt', name: 'TXT', desc: 'Văn bản', icon: '📄' },
   { value: 'srt', name: 'SRT', desc: 'Caption đơn giản', icon: '🎬' },
   { value: 'ass', name: 'ASS', desc: 'Caption nâng cao', icon: '💬' },
-  { value: 'vtt', name: 'VTT', desc: 'WebVTT', icon: '🌐' },
-  { value: 'json', name: 'JSON', desc: 'Dữ liệu có cấu trúc', icon: '📊' },
 ]
 
 const getFileName = (filePath) => {
@@ -264,31 +259,30 @@ const clearMedia = () => {
 const handleConvert = async () => {
   if (!mediaFile.value) return
   
-  // Chỉ implement cho ASS format
-  if (outputFormat.value !== 'ass') {
-    statusMessage.value = '⚠️ Chức năng này chỉ hỗ trợ định dạng ASS hiện tại'
-    statusType.value = 'info'
-    return
-  }
-  
   isConverting.value = true
   convertedText.value = ''
-  statusMessage.value = '⏳ Đang chuyển đổi audio sang ASS...'
+  statusMessage.value = `⏳ Đang chuyển đổi audio sang ${outputFormat.value.toUpperCase()}...`
   statusType.value = 'info'
   
   try {
-    // Gọi Tauri command để chuyển đổi
-    const outputPath = await invoke('convert_audio_to_ass', {
-      inputPath: mediaFile.value,
-      outputAssPath: null // Để tự động tạo tên file
-    })
+    // Gọi Tauri command tương ứng với format
+    let outputPath
+    if (outputFormat.value === 'ass') {
+      outputPath = await invoke('convert_audio_to_ass', {
+        inputPath: mediaFile.value,
+        outputAssPath: null // Để tự động tạo tên file
+      })
+    } else {
+      // TODO: Implement other formats
+      throw new Error(`Định dạng ${outputFormat.value.toUpperCase()} sẽ được implement trong phiên bản tiếp theo`)
+    }
     
-    // Đọc file ASS đã tạo
-    const assContent = await readTextFile(outputPath)
-    convertedText.value = assContent
+    // Đọc file đã tạo
+    const content = await readTextFile(outputPath)
+    convertedText.value = content
     autoResizeTextarea()
     
-    statusMessage.value = `✅ Chuyển đổi hoàn tất! File ASS đã được tạo tại: ${outputPath}`
+    statusMessage.value = `✅ Chuyển đổi hoàn tất! File ${outputFormat.value.toUpperCase()} đã được tạo tại: ${outputPath}`
     statusType.value = 'success'
   } catch (error) {
     console.error('Lỗi khi chuyển đổi:', error)
@@ -318,18 +312,27 @@ const downloadText = async () => {
   
   try {
     // Tạo tên file mặc định từ file input
-    let defaultName = 'caption.ass'
+    let defaultName = `caption.${outputFormat.value}`
     if (mediaFile.value) {
       const inputName = getFileName(mediaFile.value)
       const baseName = inputName.replace(/\.[^/.]+$/, '') // Bỏ extension
-      defaultName = `${baseName}_caption.ass`
+      defaultName = `${baseName}_caption.${outputFormat.value}`
+    }
+    
+    // Tạo filter tương ứng với format
+    const formatFilters = {
+      txt: { name: 'Text File', extensions: ['txt'] },
+      srt: { name: 'SRT Subtitle', extensions: ['srt'] },
+      ass: { name: 'ASS Subtitle', extensions: ['ass'] },
+      vtt: { name: 'WebVTT Subtitle', extensions: ['vtt'] },
+      json: { name: 'JSON File', extensions: ['json'] }
     }
     
     // Mở dialog để chọn nơi lưu file
     const savePath = await save({
       defaultPath: defaultName,
       filters: [
-        { name: 'ASS Subtitle', extensions: ['ass'] },
+        formatFilters[outputFormat.value] || { name: 'Text File', extensions: ['txt'] },
         { name: 'All Files', extensions: ['*'] }
       ]
     })

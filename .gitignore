@@ -43,3 +43,4 @@ dist/*
 *.cache
 src-tauri/target/debug/*
 src-tauri/target/*
+src-tauri/models/ggml-base.bin

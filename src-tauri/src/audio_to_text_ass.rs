@@ -4,74 +4,12 @@ use std::io::Write;
 use anyhow::Result;
 use crate::utils::find_ffmpeg_by_os::run_ffmpeg_sync;
 
-/// Segment chứa thông tin timestamp và text
+/// Segment chứa thông tin timestamp và text từ Whisper
 #[derive(Debug, Clone)]
 pub struct TranscriptSegment {
     pub start: f64,  // seconds
     pub end: f64,    // seconds
     pub text: String,
-}
-
-/// Tìm đường dẫn đến Whisper model
-fn find_whisper_model(model_name: &str) -> Option<String> {
-    use std::path::PathBuf;
-    
-    // Nếu là đường dẫn tuyệt đối và tồn tại, dùng luôn
-    let path = PathBuf::from(model_name);
-    if path.is_absolute() && path.exists() {
-        return Some(model_name.to_string());
-    }
-    
-    // Tìm trong các vị trí khác nhau
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(app_dir) = exe_path.parent() {
-            #[cfg(target_os = "macos")]
-            {
-                // macOS: Tìm trong app bundle Resources/
-                if let Some(contents_dir) = app_dir.parent() {
-                    let resources_dir = contents_dir.join("Resources");
-                    
-                    let paths = vec![
-                        resources_dir.join("models").join(model_name),
-                        resources_dir.join(model_name),
-                    ];
-                    
-                    for p in paths {
-                        if p.exists() {
-                            return Some(p.to_string_lossy().to_string());
-                        }
-                    }
-                }
-            }
-            
-            // Thử các đường dẫn tương đối từ thư mục exe
-            let paths = vec![
-                app_dir.join("models").join(model_name),
-                app_dir.join(model_name),
-            ];
-            
-            for p in paths {
-                if p.exists() {
-                    return Some(p.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-    
-    // Thử đường dẫn tương đối từ working directory
-    let paths = vec![
-        PathBuf::from("models").join(model_name),
-        PathBuf::from("src-tauri").join("models").join(model_name),
-        PathBuf::from(model_name),
-    ];
-    
-    for p in paths {
-        if p.exists() {
-            return Some(p.to_string_lossy().to_string());
-        }
-    }
-    
-    None
 }
 
 /// Vị trí caption trên video
@@ -152,10 +90,159 @@ impl VideoFormat {
     }
 }
 
+/// Cấu hình màu sắc cho ASS subtitle
+#[derive(Debug, Clone)]
+pub struct AssColorConfig {
+    pub text_color: String,      // Hex color cho text
+    pub border_color: String,    // Hex color cho viền text
+    pub highlight_color: String, // Hex color cho karaoke highlight
+}
+
+impl Default for AssColorConfig {
+    fn default() -> Self {
+        Self {
+            text_color: "FFFFFF".to_string(),   // Trắng
+            border_color: "000000".to_string(), // Đen
+            highlight_color: "00FFFF".to_string(), // Cyan
+        }
+    }
+}
+
+/// Cấu hình hoàn chỉnh cho ASS export
+#[derive(Debug, Clone)]
+pub struct AssExportConfig {
+    pub language: String,
+    pub position: CaptionPosition,
+    pub video_format: VideoFormat,
+    pub colors: AssColorConfig,
+    pub enable_karaoke: bool,     // Bật/tắt karaoke effects
+    pub font_name: String,        // Font family
+    pub custom_font_size: Option<u32>, // Override font size
+}
+
+impl Default for AssExportConfig {
+    fn default() -> Self {
+        Self {
+            language: "en".to_string(),
+            position: CaptionPosition::Center,
+            video_format: VideoFormat::Landscape,
+            colors: AssColorConfig::default(),
+            enable_karaoke: true,
+            font_name: "Arial".to_string(),
+            custom_font_size: None,
+        }
+    }
+}
+
+impl AssExportConfig {
+    /// Tạo config từ các tham số option strings
+    pub fn from_options(
+        language: Option<&str>,
+        position: Option<&str>,
+        video_format: Option<&str>,
+        text_color: Option<&str>,
+        border_color: Option<&str>,
+        highlight_color: Option<&str>,
+    ) -> Self {
+        let mut config = Self::default();
+        
+        if let Some(lang) = language {
+            config.language = lang.to_string();
+        }
+        
+        if let Some(pos) = position {
+            config.position = CaptionPosition::from_str(pos);
+        }
+        
+        if let Some(format) = video_format {
+            config.video_format = VideoFormat::from_str(format);
+        }
+        
+        if let Some(text_col) = text_color {
+            config.colors.text_color = text_col.to_string();
+        }
+        
+        if let Some(border_col) = border_color {
+            config.colors.border_color = border_col.to_string();
+        }
+        
+        if let Some(highlight_col) = highlight_color {
+            config.colors.highlight_color = highlight_col.to_string();
+        }
+        
+        config
+    }
+}
+
+/// Tìm đường dẫn đến Whisper model
+fn find_whisper_model(model_name: &str) -> Option<String> {
+    use std::path::PathBuf;
+    
+    // Nếu là đường dẫn tuyệt đối và tồn tại, dùng luôn
+    let path = PathBuf::from(model_name);
+    if path.is_absolute() && path.exists() {
+        return Some(model_name.to_string());
+    }
+    
+    // Tìm trong các vị trí khác nhau
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(app_dir) = exe_path.parent() {
+            #[cfg(target_os = "macos")]
+            {
+                // macOS: Tìm trong app bundle Resources/
+                if let Some(contents_dir) = app_dir.parent() {
+                    let resources_dir = contents_dir.join("Resources");
+                    
+                    let paths = vec![
+                        resources_dir.join("models").join(model_name),
+                        resources_dir.join(model_name),
+                    ];
+                    
+                    for p in paths {
+                        if p.exists() {
+                            return Some(p.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+            
+            // Thử các đường dẫn tương đối từ thư mục exe
+            let paths = vec![
+                app_dir.join("models").join(model_name),
+                app_dir.join(model_name),
+            ];
+            
+            for p in paths {
+                if p.exists() {
+                    return Some(p.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    
+    // Thử đường dẫn tương đối từ working directory
+    let paths = vec![
+        PathBuf::from("models").join(model_name),
+        PathBuf::from("src-tauri").join("models").join(model_name),
+        PathBuf::from(model_name),
+    ];
+    
+    for p in paths {
+        if p.exists() {
+            return Some(p.to_string_lossy().to_string());
+        }
+    }
+    
+    None
+}
+
 /// Chuyển file audio/video → file .ass với timestamps chính xác
 /// Sử dụng whisper-rs (bindings cho whisper.cpp)
 /// - position: "top", "center", "bottom" (mặc định: "center")
 /// - video_format: "landscape" (16:9) hoặc "short/portrait" (9:16)
+/// - text_color: hex color cho text (mặc định: "FFFFFF" - trắng)
+/// - border_color: hex color cho viền text (mặc định: "000000" - đen)
+/// - highlight_color: hex color cho karaoke highlight (mặc định: "00FFFF" - vàng)
 pub fn audio_to_ass(
     input_path: &str,
     output_ass_path: Option<&str>,
@@ -163,6 +250,9 @@ pub fn audio_to_ass(
     language: Option<&str>,
     position: Option<&str>,
     video_format: Option<&str>,
+    text_color: Option<&str>,
+    border_color: Option<&str>,
+    highlight_color: Option<&str>,
 ) -> Result<String> {
     // Đường dẫn mặc định cho model (whisper.cpp format .bin)
     let model_name = model_path.unwrap_or("ggml-base.bin");
@@ -170,7 +260,7 @@ pub fn audio_to_ass(
     
     println!("🎤 Đang tìm mô hình Whisper...");
     
-    // Tìm model
+    // Tìm model base
     let model = find_whisper_model(model_name).ok_or_else(|| {
         anyhow::anyhow!(
             "Không tìm thấy file model: {}\n\
@@ -258,12 +348,18 @@ pub fn audio_to_ass(
             .unwrap_or_else(|| "audio_caption.ass".to_string())
     });
 
-    // Parse position và video format
-    let caption_pos = CaptionPosition::from_str(position.unwrap_or("center"));
-    let vid_format = VideoFormat::from_str(video_format.unwrap_or("landscape"));
+    // Tạo cấu hình ASS export
+    let ass_config = AssExportConfig::from_options(
+        Some(lang),
+        position,
+        video_format,
+        text_color,
+        border_color,
+        highlight_color,
+    );
     
     // Xuất ASS với timestamps chính xác
-    export_to_ass(&segments, lang, &final_output, caption_pos, vid_format)?;
+    export_segments_to_ass_file(&segments, &ass_config, &final_output)?;
 
     println!("🎉 HOÀN TẤT! File ASS đã tạo:");
     println!("→ {}", final_output);
@@ -349,49 +445,90 @@ fn ensure_wav_format(input_path: &str) -> Result<String> {
     }
 }
 
-/// Xuất file ASS với timestamps chính xác từ segments
-/// - Sử dụng 1 style: chữ trắng viền đen
-/// - Hỗ trợ karaoke highlight từng word
-/// - Vị trí caption có thể tùy chỉnh (top, center, bottom)
-/// - Hỗ trợ cả video ngang (16:9) và video dọc/short (9:16)
-fn export_to_ass(
-    segments: &[TranscriptSegment], 
-    language: &str, 
-    path: &str,
-    position: CaptionPosition,
-    video_format: VideoFormat,
+/// Chuyển đổi segments thành nội dung ASS file hoàn chỉnh
+pub fn segments_to_ass_content(
+    segments: &[TranscriptSegment],
+    config: &AssExportConfig,
+) -> Result<String> {
+    let mut content = String::new();
+    
+    // Tạo ASS header
+    let header = generate_ass_header(config)?;
+    content.push_str(&header);
+    
+    // Tạo events từ segments
+    for segment in segments.iter() {
+        if segment.text.trim().is_empty() {
+            continue;
+        }
+        
+        let start_time = seconds_to_ass_time(segment.start);
+        let end_time = seconds_to_ass_time(segment.end);
+        
+        // Tạo text với karaoke effects nếu enabled
+        let formatted_text = if config.enable_karaoke {
+            create_karaoke_text(&segment.text, segment.start, segment.end)
+        } else {
+            escape_ass_text(&segment.text)
+        };
+        
+        let style_name = if config.enable_karaoke { "Karaoke" } else { "Default" };
+        let line = format!("Dialogue: 0,{},{},{},,0,0,0,,{}\n", 
+            start_time, end_time, style_name, formatted_text);
+        content.push_str(&line);
+    }
+    
+    Ok(content)
+}
+
+/// Xuất ASS file với cấu hình tùy chỉnh
+pub fn export_segments_to_ass_file(
+    segments: &[TranscriptSegment],
+    config: &AssExportConfig,
+    output_path: &str,
 ) -> Result<()> {
-    let mut file = File::create(path)?;
+    let content = segments_to_ass_content(segments, config)?;
     
+    let mut file = File::create(output_path)?;
+    file.write_all(content.as_bytes())?;
+    
+    Ok(())
+}
+
+/// Tạo ASS header với cấu hình tùy chỉnh
+fn generate_ass_header(config: &AssExportConfig) -> Result<String> {
     // Lấy các thông số từ video format
-    let (res_x, res_y) = video_format.resolution();
-    let font_size = video_format.font_size();
-    let margin_lr = video_format.margin_lr();
-    let outline = video_format.outline();
+    let (res_x, res_y) = config.video_format.resolution();
+    let font_size = config.custom_font_size
+        .unwrap_or_else(|| config.video_format.font_size());
+    let margin_lr = config.video_format.margin_lr();
+    let outline = config.video_format.outline();
     
-    let alignment = position.to_alignment();
+    let alignment = config.position.to_alignment();
     
     // MarginV tùy theo vị trí và format
-    let margin_v = match (&position, &video_format) {
+    let margin_v = match (&config.position, &config.video_format) {
         (CaptionPosition::Top, VideoFormat::Landscape) => 50,
         (CaptionPosition::Top, VideoFormat::Portrait) => 80,
         (CaptionPosition::Center, _) => 10,
         (CaptionPosition::Bottom, VideoFormat::Landscape) => 80,
-        (CaptionPosition::Bottom, VideoFormat::Portrait) => 150,  // Cao hơn cho short
+        (CaptionPosition::Bottom, VideoFormat::Portrait) => 150,
     };
     
-    // WrapStyle: 0 = smart wrap, 2 = wrap theo margin (tốt hơn cho portrait)
-    let wrap_style = match video_format {
+    // WrapStyle: 0 = smart wrap, 2 = wrap theo margin
+    let wrap_style = match config.video_format {
         VideoFormat::Landscape => 0,
         VideoFormat::Portrait => 2,
     };
 
-    // ASS Header với style động theo video format:
-    // - Chữ trắng (FFFFFF), viền đen (000000)
-    // - SecondaryColour vàng (00FFFF) cho karaoke highlight
-    let ass_header = format!(
+    // Chuyển đổi hex colors sang ASS format
+    let ass_text_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.text_color));
+    let ass_border_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.border_color));
+    let ass_highlight_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.highlight_color));
+    
+    let header = format!(
         r#"[Script Info]
-Title: Caption - Generated by whisper-rs
+Title: Caption - Generated by YTBFlow
 ScriptType: v4.00+
 Collisions: Normal
 PlayResX: {}
@@ -401,40 +538,21 @@ WrapStyle: {}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,{},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{},1.5,{},{},{},{},1
-Style: Karaoke,Arial,{},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{},1.5,{},{},{},{},1
+Style: Default,{},{},{},&H000000FF,{},&H80000000,-1,0,0,0,100,100,0,0,1,{},1.5,{},{},{},{},1
+Style: Karaoke,{},{},{},{},{},&H80000000,-1,0,0,0,100,100,0,0,1,{},1.5,{},{},{},{},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 "#, 
-        res_x, res_y, language, wrap_style,
-        font_size, outline, alignment, margin_lr, margin_lr, margin_v,
-        font_size, outline, alignment, margin_lr, margin_lr, margin_v
+        res_x, res_y, config.language, wrap_style,
+        config.font_name, font_size, ass_text_color, ass_border_color, outline, alignment, margin_lr, margin_lr, margin_v,
+        config.font_name, font_size, ass_text_color, ass_highlight_color, ass_border_color, outline, alignment, margin_lr, margin_lr, margin_v
     );
-
-    file.write_all(ass_header.as_bytes())?;
-
-    for segment in segments.iter() {
-        if segment.text.is_empty() {
-            continue;
-        }
-        
-        let start_time = seconds_to_ass_time(segment.start);
-        let end_time = seconds_to_ass_time(segment.end);
-        
-        // Tạo karaoke effect cho từng word
-        let karaoke_text = create_karaoke_text(&segment.text, segment.start, segment.end);
-        
-        let line = format!("Dialogue: 0,{},{},Karaoke,,0,0,0,,{}\n", 
-            start_time, end_time, karaoke_text);
-        file.write_all(line.as_bytes())?;
-    }
-
-    Ok(())
+    
+    Ok(header)
 }
 
 /// Tạo karaoke text với highlight effect
-/// Mỗi word sẽ được highlight khi đang đọc, sau đó quay về màu trắng
 fn create_karaoke_text(text: &str, start: f64, end: f64) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     
@@ -445,7 +563,7 @@ fn create_karaoke_text(text: &str, start: f64, end: f64) -> String {
     let duration = end - start;
     let word_count = words.len();
     
-    // Chia đều thời gian cho mỗi word (tính bằng centiseconds cho \k tag)
+    // Chia đều thời gian cho mỗi word (tính bằng centiseconds)
     let duration_per_word_cs = ((duration / word_count as f64) * 100.0) as i64;
     
     let mut result = String::new();
@@ -453,14 +571,9 @@ fn create_karaoke_text(text: &str, start: f64, end: f64) -> String {
     for (i, word) in words.iter().enumerate() {
         let escaped_word = escape_ass_text(word);
         
-        // \k = karaoke fill effect (word được highlight khi đến lượt)
-        // \kf = karaoke fill with smooth transition
-        // Duration tính bằng centiseconds
         if i == 0 {
-            // Word đầu tiên: bắt đầu highlight
             result.push_str(&format!("{{\\kf{}}}{}", duration_per_word_cs, escaped_word));
         } else {
-            // Các word tiếp theo: thêm space và highlight
             result.push_str(&format!(" {{\\kf{}}}{}", duration_per_word_cs, escaped_word));
         }
     }
@@ -477,6 +590,32 @@ fn escape_ass_text(text: &str) -> String {
         .replace('\n', r"\N")
 }
 
+/// Chuyển đổi hex color (RGB) sang ASS format (BGR)
+fn hex_to_ass_bgr(hex: &str) -> String {
+    let clean_hex = hex.trim_start_matches('#');
+    
+    let padded_hex = if clean_hex.len() == 3 {
+        // "F0A" -> "FF00AA"
+        format!("{}{}{}{}{}{}", 
+            clean_hex.chars().nth(0).unwrap(), clean_hex.chars().nth(0).unwrap(),
+            clean_hex.chars().nth(1).unwrap(), clean_hex.chars().nth(1).unwrap(), 
+            clean_hex.chars().nth(2).unwrap(), clean_hex.chars().nth(2).unwrap())
+    } else if clean_hex.len() >= 6 {
+        clean_hex[0..6].to_uppercase()
+    } else {
+        "000000".to_string()
+    };
+    
+    if padded_hex.len() == 6 {
+        let r = &padded_hex[0..2];
+        let g = &padded_hex[2..4]; 
+        let b = &padded_hex[4..6];
+        format!("{}{}{}", b, g, r)  // BGR
+    } else {
+        "000000".to_string()
+    }
+}
+
 /// Chuyển giây → định dạng ASS: 0:00:12.34
 fn seconds_to_ass_time(seconds: f64) -> String {
     let total_centisec = (seconds * 100.0) as i64;
@@ -489,6 +628,9 @@ fn seconds_to_ass_time(seconds: f64) -> String {
 
 /// Tauri command: Chuyển file audio/video → file .ass
 /// - position: "top", "center", "bottom" (mặc định: "center")
+/// - text_color: hex color cho text (mặc định: "FFFFFF")
+/// - border_color: hex color cho viền text (mặc định: "000000")
+/// - highlight_color: hex color cho karaoke highlight (mặc định: "00FFFF")
 #[tauri::command]
 pub async fn convert_audio_to_ass(
     input_path: String,
@@ -497,6 +639,9 @@ pub async fn convert_audio_to_ass(
     language: Option<String>,
     position: Option<String>,
     video_format: Option<String>,
+    text_color: Option<String>,
+    border_color: Option<String>,
+    highlight_color: Option<String>,
 ) -> Result<String, String> {
     // Chạy trong blocking thread vì whisper processing nặng
     tokio::task::spawn_blocking(move || {
@@ -506,12 +651,52 @@ pub async fn convert_audio_to_ass(
             model_path.as_deref(),
             language.as_deref(),
             position.as_deref(),
-            video_format.as_deref()
+            video_format.as_deref(),
+            text_color.as_deref(),
+            border_color.as_deref(),
+            highlight_color.as_deref()
         )
     })
     .await
     .map_err(|e| format!("Task error: {}", e))?
     .map_err(|e| format!("Lỗi khi chuyển đổi: {}", e))
+}
+
+/// Tauri command: Chuyển segments thành nội dung ASS string (không lưu file)
+/// Hữu ích cho preview hoặc return content trực tiếp
+#[tauri::command]
+pub async fn segments_to_ass_string(
+    segments: Vec<(f64, f64, String)>, // (start, end, text) tuples
+    language: Option<String>,
+    position: Option<String>,
+    video_format: Option<String>,
+    text_color: Option<String>,
+    border_color: Option<String>,
+    highlight_color: Option<String>,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        // Convert tuples to TranscriptSegment
+        let transcript_segments: Vec<TranscriptSegment> = segments
+            .into_iter()
+            .map(|(start, end, text)| TranscriptSegment { start, end, text })
+            .collect();
+
+        // Tạo cấu hình ASS export
+        let ass_config = AssExportConfig::from_options(
+            language.as_deref(),
+            position.as_deref(),
+            video_format.as_deref(),
+            text_color.as_deref(),
+            border_color.as_deref(),
+            highlight_color.as_deref(),
+        );
+
+        // Tạo nội dung ASS
+        segments_to_ass_content(&transcript_segments, &ass_config)
+            .map_err(|e| format!("Lỗi khi tạo ASS content: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
 }
 
 /// Tauri command: Lấy danh sách models có sẵn
@@ -556,4 +741,41 @@ pub async fn read_ass_file(file_path: String) -> Result<String, String> {
 pub async fn delete_temp_ass_file(file_path: String) -> Result<(), String> {
     std::fs::remove_file(&file_path)
         .map_err(|e| format!("Không thể xóa file: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hex_to_ass_bgr() {
+        assert_eq!(hex_to_ass_bgr("FF0000"), "0000FF"); // Red RGB -> Red BGR
+        assert_eq!(hex_to_ass_bgr("00FF00"), "00FF00"); // Green RGB -> Green BGR
+        assert_eq!(hex_to_ass_bgr("0000FF"), "FF0000"); // Blue RGB -> Blue BGR
+        assert_eq!(hex_to_ass_bgr("#FFFFFF"), "FFFFFF"); // White with #
+        assert_eq!(hex_to_ass_bgr("F0A"), "A0A0F0F0"); // 3 char expansion
+    }
+
+    #[test]
+    fn test_caption_position() {
+        assert_eq!(CaptionPosition::from_str("top").to_alignment(), 8);
+        assert_eq!(CaptionPosition::from_str("center").to_alignment(), 5);
+        assert_eq!(CaptionPosition::from_str("bottom").to_alignment(), 2);
+        assert_eq!(CaptionPosition::from_str("invalid").to_alignment(), 5); // Default center
+    }
+
+    #[test]
+    fn test_video_format() {
+        assert_eq!(VideoFormat::from_str("landscape").resolution(), (1920, 1080));
+        assert_eq!(VideoFormat::from_str("portrait").resolution(), (1080, 1920));
+        assert_eq!(VideoFormat::from_str("tiktok").resolution(), (1080, 1920));
+        assert_eq!(VideoFormat::from_str("invalid").resolution(), (1920, 1080)); // Default landscape
+    }
+
+    #[test]
+    fn test_ass_time_format() {
+        assert_eq!(seconds_to_ass_time(0.0), "0:00:00.00");
+        assert_eq!(seconds_to_ass_time(61.5), "0:01:01.50");
+        assert_eq!(seconds_to_ass_time(3661.25), "1:01:01.25");
+    }
 }

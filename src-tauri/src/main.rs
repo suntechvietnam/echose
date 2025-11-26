@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod audio_to_text;  // Speech-to-text với whisper-rs
+mod audio_to_text_ass;  // Speech-to-text với whisper-rs for ASS format
 mod file_audio;
 mod filesystem;
 mod image_to_video;
@@ -26,12 +26,13 @@ fn main() {
             image_to_video::stop_image_video_creation,
             // Audio utilities
             file_audio::get_audio_duration,
-            // Audio to text (whisper-rs)
-            audio_to_text::convert_audio_to_ass,
-            audio_to_text::list_whisper_models,
-            audio_to_text::save_ass_file,
-            audio_to_text::read_ass_file,
-            audio_to_text::delete_temp_ass_file
+            // Audio to text (whisper-rs) - ASS format
+            audio_to_text_ass::convert_audio_to_ass,
+            audio_to_text_ass::segments_to_ass_string,
+            audio_to_text_ass::list_whisper_models,
+            audio_to_text_ass::save_ass_file,
+            audio_to_text_ass::read_ass_file,
+            audio_to_text_ass::delete_temp_ass_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
