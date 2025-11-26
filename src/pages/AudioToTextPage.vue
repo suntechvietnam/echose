@@ -272,8 +272,13 @@ const handleConvert = async () => {
         inputPath: mediaFile.value,
         outputAssPath: null // Để tự động tạo tên file
       })
+    } else if (outputFormat.value === 'txt') {
+      outputPath = await invoke('convert_audio_to_txt', {
+        inputPath: mediaFile.value,
+        outputTxtPath: null // Để tự động tạo tên file
+      })
     } else {
-      // TODO: Implement other formats
+      // TODO: Implement other formats (SRT, VTT, etc.)
       throw new Error(`Định dạng ${outputFormat.value.toUpperCase()} sẽ được implement trong phiên bản tiếp theo`)
     }
     

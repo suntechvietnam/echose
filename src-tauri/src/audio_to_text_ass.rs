@@ -269,14 +269,19 @@ fn find_whisper_model(model_name: &str) -> Option<String> {
         return Some(model_name.to_string());
     }
     
+    println!("🔍 Searching for model: {}", model_name);
+    
     // Tìm trong các vị trí khác nhau
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(app_dir) = exe_path.parent() {
+            println!("📁 App directory: {}", app_dir.display());
+            
             #[cfg(target_os = "macos")]
             {
                 // macOS: Tìm trong app bundle Resources/
                 if let Some(contents_dir) = app_dir.parent() {
                     let resources_dir = contents_dir.join("Resources");
+                    println!("📁 Checking macOS Resources: {}", resources_dir.display());
                     
                     let paths = vec![
                         resources_dir.join("models").join(model_name),
@@ -284,28 +289,59 @@ fn find_whisper_model(model_name: &str) -> Option<String> {
                     ];
                     
                     for p in paths {
+                        println!("   Trying: {}", p.display());
                         if p.exists() {
+                            println!("✅ Found model at: {}", p.display());
                             return Some(p.to_string_lossy().to_string());
                         }
                     }
                 }
             }
             
-            // Thử các đường dẫn tương đối từ thư mục exe
-            let paths = vec![
-                app_dir.join("models").join(model_name),
-                app_dir.join(model_name),
-            ];
+            #[cfg(target_os = "windows")]
+            {
+                // Windows: Tìm trong cùng thư mục exe và bundled resources
+                println!("📁 Checking Windows app directory and bundled resources");
+                
+                let paths = vec![
+                    // Bundled resources (từ tauri.conf.json)
+                    app_dir.join("models").join(model_name),
+                    app_dir.join(model_name),
+                    // Backup locations  
+                    app_dir.join("resources").join("models").join(model_name),
+                    app_dir.join("_up_").join("models").join(model_name), // Some bundlers use _up_
+                ];
+                
+                for p in paths {
+                    println!("   Trying: {}", p.display());
+                    if p.exists() {
+                        println!("✅ Found model at: {}", p.display());
+                        return Some(p.to_string_lossy().to_string());
+                    }
+                }
+            }
             
-            for p in paths {
-                if p.exists() {
-                    return Some(p.to_string_lossy().to_string());
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            {
+                // Linux và các platform khác
+                let paths = vec![
+                    app_dir.join("models").join(model_name),
+                    app_dir.join(model_name),
+                ];
+                
+                for p in paths {
+                    println!("   Trying: {}", p.display());
+                    if p.exists() {
+                        println!("✅ Found model at: {}", p.display());
+                        return Some(p.to_string_lossy().to_string());
+                    }
                 }
             }
         }
     }
     
-    // Thử đường dẫn tương đối từ working directory
+    // Thử đường dẫn tương đối từ working directory (development mode)
+    println!("📁 Checking development paths from working directory");
     let paths = vec![
         PathBuf::from("models").join(model_name),
         PathBuf::from("src-tauri").join("models").join(model_name),
@@ -313,11 +349,14 @@ fn find_whisper_model(model_name: &str) -> Option<String> {
     ];
     
     for p in paths {
+        println!("   Trying: {}", p.display());
         if p.exists() {
+            println!("✅ Found model at: {}", p.display());
             return Some(p.to_string_lossy().to_string());
         }
     }
     
+    println!("❌ Model '{}' not found in any location", model_name);
     None
 }
 
@@ -380,8 +419,14 @@ pub fn audio_to_ass(
     // Thiết lập parameters
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     
-    // Cấu hình ngôn ngữ
-    params.set_language(Some(lang));
+    // Cấu hình ngôn ngữ - auto detect nếu không được chỉ định
+    if language.is_some() {
+        params.set_language(Some(lang));
+        println!("🌐 Sử dụng ngôn ngữ: {}", lang);
+    } else {
+        params.set_language(None); // Auto-detect language
+        println!("🔍 Auto-detecting language...");
+    }
     params.set_translate(false); // Không dịch, giữ nguyên ngôn ngữ gốc
     params.set_print_special(false);
     params.set_print_progress(true);
@@ -389,7 +434,11 @@ pub fn audio_to_ass(
     params.set_print_timestamps(false);
     
     // Tạo state và chạy transcription
-    println!("🚀 Đang transcribe (ngôn ngữ: {})...", lang);
+    if language.is_some() {
+        println!("🚀 Đang transcribe (ngôn ngữ: {})...", lang);
+    } else {
+        println!("🚀 Đang transcribe (auto-detect language)...");
+    }
     let mut state = ctx.create_state()
         .map_err(|e| anyhow::anyhow!("Không thể tạo Whisper state: {}", e))?;
     

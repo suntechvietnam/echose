@@ -58,7 +58,8 @@
       ],
       "resources": [
         "resources/window/*",
-        "resources/mac/*"
+        "resources/mac/*",
+        "models/*"
       ]
     },
     "security": {

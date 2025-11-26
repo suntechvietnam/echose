@@ -67,6 +67,62 @@ jobs:
             exit 1
           }
 
+      - name: Download Whisper Model
+        run: |
+          Write-Host "Downloading Whisper model for bundling..."
+          
+          # Tạo thư mục models
+          $modelsDir = "src-tauri\models"
+          New-Item -ItemType Directory -Force -Path $modelsDir | Out-Null
+          Write-Host "✓ Created models directory: $modelsDir"
+          
+          # Download ggml-base.bin model (~142MB)
+          $modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+          $modelPath = "$modelsDir\ggml-base.bin"
+          
+          if (Test-Path $modelPath) {
+            $existingSize = (Get-Item $modelPath).Length
+            Write-Host "Model already exists: $modelPath ($('{0:N0}' -f $existingSize) bytes)"
+          } else {
+            Write-Host "Downloading Whisper model from HuggingFace..."
+            try {
+              # Use curl for more reliable download with progress
+              curl.exe -L -o $modelPath $modelUrl --progress-bar
+              
+              if (Test-Path $modelPath) {
+                $downloadedSize = (Get-Item $modelPath).Length
+                Write-Host "✓ Model downloaded successfully: $('{0:N0}' -f $downloadedSize) bytes"
+                
+                # Verify file size (should be around 142MB)
+                $expectedMinSize = 140 * 1024 * 1024  # 140MB minimum
+                if ($downloadedSize -gt $expectedMinSize) {
+                  Write-Host "✓ Model file size verification passed"
+                } else {
+                  Write-Host "⚠ Warning: Model file seems smaller than expected"
+                  Write-Host "  Downloaded: $('{0:N0}' -f $downloadedSize) bytes"
+                  Write-Host "  Expected: >$('{0:N0}' -f $expectedMinSize) bytes"
+                }
+              } else {
+                throw "Model file not found after download"
+              }
+            } catch {
+              Write-Host "✗ Failed to download model: $_"
+              Write-Host "Trying alternative download method..."
+              
+              # Fallback: PowerShell Invoke-WebRequest
+              try {
+                Invoke-WebRequest -Uri $modelUrl -OutFile $modelPath -UseBasicParsing
+                $downloadedSize = (Get-Item $modelPath).Length
+                Write-Host "✓ Model downloaded via PowerShell: $('{0:N0}' -f $downloadedSize) bytes"
+              } catch {
+                Write-Host "✗ All download methods failed: $_"
+                exit 1
+              }
+            }
+          }
+          
+          Write-Host "✓ Whisper model preparation completed"
+
       - name: Prepare FFmpeg for Windows
         run: |
           Write-Host "Preparing FFmpeg for Windows build..."
@@ -630,6 +686,35 @@ jobs:
             }
           } else {
             Write-Host "No EXE files found"
+          }
+          
+          # Final verification: Check Whisper models before upload
+          Write-Host "`n=== Final Whisper Model Verification ==="
+          $modelsDir = "src-tauri\models"
+          if (Test-Path $modelsDir) {
+            $modelFiles = Get-ChildItem -Path $modelsDir -File
+            Write-Host "✓ Models directory exists with $($modelFiles.Count) files:"
+            
+            foreach ($model in $modelFiles) {
+              $sizeInMB = [math]::Round($model.Length / 1MB, 2)
+              Write-Host "  - $($model.Name) (${sizeInMB} MB)"
+            }
+            
+            # Check if ggml-base.bin exists and has correct size
+            $baseModel = $modelFiles | Where-Object { $_.Name -eq "ggml-base.bin" }
+            if ($baseModel) {
+              if ($baseModel.Length -gt 140MB) {
+                Write-Host "✓ ggml-base.bin model ready for deployment"
+              } else {
+                Write-Host "⚠ Warning: ggml-base.bin seems too small ($(([math]::Round($baseModel.Length / 1MB, 2))) MB)"
+              }
+            } else {
+              Write-Host "✗ CRITICAL: ggml-base.bin not found!"
+              Write-Host "   Users will get 'Không tìm thấy file model: ggml-base.bin' error"
+            }
+          } else {
+            Write-Host "✗ CRITICAL: Models directory not found at $modelsDir"
+            Write-Host "   Audio-to-text feature will not work in deployed app"
           }
 
       - name: Upload MSI installer

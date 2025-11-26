@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_to_text_ass;  // Speech-to-text với whisper-rs for ASS format
+mod audio_to_text_txt;  // Speech-to-text với whisper-rs for TXT format
 mod file_audio;
 mod filesystem;
 mod image_to_video;
@@ -32,7 +33,10 @@ fn main() {
             audio_to_text_ass::list_whisper_models,
             audio_to_text_ass::save_ass_file,
             audio_to_text_ass::read_ass_file,
-            audio_to_text_ass::delete_temp_ass_file
+            audio_to_text_ass::delete_temp_ass_file,
+            // Audio to text (whisper-rs) - TXT format
+            audio_to_text_txt::convert_audio_to_txt,
+            audio_to_text_txt::segments_to_txt_string
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

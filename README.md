@@ -15,7 +15,24 @@
 npm install
 ```
 
-2. Chạy ứng dụng ở chế độ development:
+2. Tải Whisper models (cần thiết cho audio-to-text):
+
+**Linux/macOS:**
+```bash
+./download-models.sh
+```
+
+**Windows:**
+```powershell
+.\download-models.ps1
+```
+
+Hoặc tải thủ công:
+```bash
+curl -L -o src-tauri/models/ggml-base.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+```
+
+3. Chạy ứng dụng ở chế độ development:
 ```bash
 npm run tauri:dev
 ```
