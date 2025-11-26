@@ -127,7 +127,7 @@ impl Default for AssExportConfig {
     fn default() -> Self {
         Self {
             language: "en".to_string(),
-            position: CaptionPosition::CenterBottom,
+            position: CaptionPosition::Center,
             video_format: VideoFormat::Landscape,
             colors: AssColorConfig::default(),
             enable_karaoke: true,
@@ -241,11 +241,11 @@ fn find_whisper_model(model_name: &str) -> Option<String> {
 
 /// Chuyển file audio/video → file .ass với timestamps chính xác
 /// Sử dụng whisper-rs (bindings cho whisper.cpp)
-/// - position: "top", "center", "bottom" (mặc định: "center")
+/// - position: "top", "center", "bottom", "centerbottom" (mặc định: "center")
 /// - video_format: "landscape" (16:9) hoặc "short/portrait" (9:16)
 /// - text_color: hex color cho text (mặc định: "FFFFFF" - trắng)
 /// - border_color: hex color cho viền text (mặc định: "000000" - đen)
-/// - highlight_color: hex color cho karaoke highlight (mặc định: "00FFFF" - vàng)
+/// - highlight_color: hex color cho karaoke highlight (mặc định: "FFFF00" - vàng)
 pub fn audio_to_ass(
     input_path: &str,
     output_ass_path: Option<&str>,
@@ -632,10 +632,10 @@ fn seconds_to_ass_time(seconds: f64) -> String {
 }
 
 /// Tauri command: Chuyển file audio/video → file .ass
-/// - position: "top", "center", "bottom" (mặc định: "center")
+/// - position: "top", "center", "bottom", "centerbottom" (mặc định: "center")
 /// - text_color: hex color cho text (mặc định: "FFFFFF")
 /// - border_color: hex color cho viền text (mặc định: "000000")
-/// - highlight_color: hex color cho karaoke highlight (mặc định: "00FFFF")
+/// - highlight_color: hex color cho karaoke highlight (mặc định: "FFFF00")
 #[tauri::command]
 pub async fn convert_audio_to_ass(
     input_path: String,

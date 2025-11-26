@@ -1,72 +1,29 @@
 use crate::file_audio::get_audio_duration;
 use crate::utils::find_ffmpeg_by_os::run_ffmpeg;
-use std::path::PathBuf;
+use crate::audio_to_text_ass::audio_to_ass;
 
-/// Tìm đường dẫn đến file caption
-fn find_caption_file() -> Result<String, String> {
-    let caption_filename = "audio_01_caption.ass";
+/// Tạo file caption từ audio path sử dụng Whisper
+async fn generate_caption_from_audio(audio_path: &str, video_aspect_ratio: &str) -> Result<String, String> {
+    // Tạo đường dẫn output cho caption file
+    let caption_output_path = format!("{}_caption.ass", 
+        audio_path.rsplit_once('.').map(|(name, _)| name).unwrap_or(audio_path)
+    );
     
-    // Nếu là đường dẫn tuyệt đối và tồn tại, dùng luôn
-    let path = PathBuf::from(caption_filename);
-    if path.is_absolute() && path.exists() {
-        return Ok(caption_filename.to_string());
+    // Gọi audio_to_ass để tạo caption từ audio
+    match audio_to_ass(
+        audio_path,
+        Some(&caption_output_path),
+        None, // Sử dụng model mặc định
+        None, // Ngôn ngữ mặc định (en)
+        None, // Vị trí mặc định (CenterBottom)
+        None, // Video format mặc định (Landscape)
+        None, // Text color mặc định
+        None, // Border color mặc định
+        None, // Highlight color mặc định
+    ) {
+        Ok(ass_file_path) => Ok(ass_file_path),
+        Err(e) => Err(format!("Lỗi khi tạo caption từ audio: {}", e))
     }
-    
-    // Tìm trong các vị trí khác nhau
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(app_dir) = exe_path.parent() {
-            #[cfg(target_os = "macos")]
-            {
-                // macOS: Tìm trong app bundle Resources/
-                if let Some(contents_dir) = app_dir.parent() {
-                    let resources_dir = contents_dir.join("Resources");
-                    
-                    let paths = vec![
-                        resources_dir.join(caption_filename),
-                        resources_dir.join("src").join(caption_filename),
-                    ];
-                    
-                    for p in paths {
-                        if p.exists() {
-                            return Ok(p.to_string_lossy().to_string());
-                        }
-                    }
-                }
-            }
-            
-            // Thử các đường dẫn tương đối từ thư mục exe
-            let paths = vec![
-                app_dir.join(caption_filename),
-                app_dir.join("src").join(caption_filename),
-            ];
-            
-            for p in paths {
-                if p.exists() {
-                    return Ok(p.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-    
-    // Thử đường dẫn tương đối từ working directory
-    let paths = vec![
-        PathBuf::from(caption_filename),
-        PathBuf::from("src").join(caption_filename),
-        PathBuf::from("src-tauri").join("src").join(caption_filename),
-    ];
-    
-    for p in paths {
-        if p.exists() {
-            return Ok(p.to_string_lossy().to_string());
-        }
-    }
-    
-    Err(format!(
-        "Không tìm thấy file caption: {}\n\
-        Đã tìm trong: app directory, src/, src-tauri/src/, và working directory.\n\
-        Vui lòng đảm bảo file {} tồn tại.",
-        caption_filename, caption_filename
-    ))
 }
 
 /**
@@ -116,15 +73,16 @@ pub async fn merge_audio_without_caption(
 
 /**
  * Merge video với audio và caption, đảm bảo video loop để match với audio duration
- * Sử dụng file caption cố định: audio_01_caption.ass
+ * Tự động tạo caption từ file audio bằng Whisper
  */
 pub async fn merge_audio_with_caption(
     video_path: &str,
     audio_path: &str,
     output_path: &str,
+    video_aspect_ratio: &str,
 ) -> Result<(), String> {
-    // Tìm đường dẫn đến file caption
-    let caption_path = find_caption_file()?;
+    // Tạo caption từ audio path
+    let caption_path = generate_caption_from_audio(audio_path, video_aspect_ratio).await?;
     
     // Lấy duration của audio file
     let audio_duration = get_audio_duration(audio_path.to_string()).await
@@ -167,5 +125,10 @@ pub async fn merge_audio_with_caption(
         let error_msg = String::from_utf8_lossy(&output.stderr);
         return Err(format!("Lỗi khi merge video với audio và caption: {}", error_msg));
     }
+
+    // Xóa file caption tạm sau khi merge xong
+    std::fs::remove_file(caption_path)
+        .map_err(|e| format!("Lỗi khi xóa file caption tạm: {}", e))?;
+
     Ok(())
 }

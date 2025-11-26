@@ -440,6 +440,7 @@ pub async fn create_video_from_images(
             &merged_audio_path,
             &final_with_audio_path_str,
             true, // has_caption = true by default
+            &video_aspect_ratio,
         ).await.map_err(|e| format!("Lỗi khi merge video với audio: {}", e))?;
         
         // Xóa file audio tạm nếu đã merge nhiều file
@@ -833,10 +834,11 @@ async fn merge_video_with_audio(
     audio_path: &str,
     output_path: &str,
     has_caption: bool,
+    video_aspect_ratio: &str,
 ) -> Result<(), String> {
     if has_caption {
         // Merge video với audio và caption
-        merge_audio_with_caption(video_path, audio_path, output_path).await
+        merge_audio_with_caption(video_path, audio_path, output_path, video_aspect_ratio).await
     } else {
         // Chỉ merge video với audio
         merge_audio_without_caption(video_path, audio_path, output_path).await
