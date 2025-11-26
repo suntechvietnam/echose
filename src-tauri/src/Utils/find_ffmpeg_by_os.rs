@@ -15,7 +15,9 @@ pub fn run_ffmpeg() -> Result<tokio::process::Command, String> {
     
     #[cfg(target_os = "windows")]
     {
-        Ok(tokio::process::Command::new(&ffmpeg_path).creation_flags(CREATE_NO_WINDOW))
+        let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        Ok(cmd)
     }
     
     #[cfg(not(target_os = "windows"))]

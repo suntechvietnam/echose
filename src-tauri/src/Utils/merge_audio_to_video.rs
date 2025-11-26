@@ -9,14 +9,21 @@ async fn generate_caption_from_audio(audio_path: &str, video_aspect_ratio: &str)
         audio_path.rsplit_once('.').map(|(name, _)| name).unwrap_or(audio_path)
     );
     
+    // Xác định vị trí caption và video format dựa trên aspect ratio
+    let (position, video_format) = match video_aspect_ratio {
+        "16:9" => (Some("centerbottom"), Some("landscape")),
+        "9:16" => (Some("center"), Some("portrait")),
+        _ => (Some("center"), Some("landscape")), // Mặc định
+    };
+    
     // Gọi audio_to_ass để tạo caption từ audio
     match audio_to_ass(
         audio_path,
         Some(&caption_output_path),
         None, // Sử dụng model mặc định
         None, // Ngôn ngữ mặc định (en)
-        None, // Vị trí mặc định (CenterBottom)
-        None, // Video format mặc định (Landscape)
+        position, // Vị trí tùy theo aspect ratio
+        video_format, // Video format tùy theo aspect ratio
         None, // Text color mặc định
         None, // Border color mặc định
         None, // Highlight color mặc định
