@@ -80,7 +80,7 @@ impl VideoFormat {
     pub fn margin_lr(&self) -> u32 {
         match self {
             VideoFormat::Landscape => 200,  // Margin lớn hơn để block caption nhỏ và căn giữa
-            VideoFormat::Portrait => 80,   // Margin vừa phải cho màn dọc
+            VideoFormat::Portrait => 120,   // Margin lớn hơn cho video dọc để tránh text tràn
         }
     }
     
