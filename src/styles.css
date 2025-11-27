@@ -23,7 +23,7 @@ body {
 /* Sidebar Styles */
 .sidebar {
     width: 220px;
-    background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(200deg, #1e2a61 0%, rgb(7, 78, 78) 90%);
     color: white;
     display: flex;
     flex-direction: column;
@@ -31,14 +31,18 @@ body {
 }
 
 .sidebar-header {
-    padding: 20px 16px;
+    padding: 16px 0px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .app-title {
-    font-size: 24px;
-    font-weight: 700;
-    margin-bottom: 5px;
+    width: 100%;
+    text-align: center;
+    cursor: pointer;
+}
+
+img.logo {
+    margin-top: 5px;
 }
 
 .app-subtitle {
@@ -51,6 +55,63 @@ body {
     flex: 1;
     padding: 0;
     overflow-y: auto;
+}
+
+.sidebar-profile {
+    padding: 14px 14px 18px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(110, 107, 107, 0.05);
+}
+
+.profile-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 16px;
+    color: #ffffff;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.profile-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    cursor: pointer;
+}
+
+.profile-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.profile-plan {
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+}
+
+.profile-plan.pro {
+    background: rgba(52, 211, 153, 0.15);
+    color: #6ee7b7;
+    border: 1px solid rgba(52, 211, 153, 0.6);
+}
+
+.profile-plan.free {
+    background: rgba(148, 163, 184, 0.2);
+    color: #6c6d6e;
+    border: 1px solid rgba(148, 163, 184, 0.7);
 }
 
 .menu-list {
@@ -74,10 +135,9 @@ body {
 }
 
 .menu-item.active {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(104, 129, 162, 0.15);
     border-left-color: white;
     color: white;
-    font-weight: 600;
 }
 
 .menu-icon {
