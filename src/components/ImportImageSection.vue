@@ -206,10 +206,6 @@ const shuffleImages = async () => {
   isShuffling.value = false
 }
 
-watch(imageFiles, (newFiles) => {
-  emit('update:imageFiles', newFiles)
-})
-
 watch(() => props.modelValue, (newValue) => {
   imageFiles.value = [...newValue]
   newValue.forEach(file => {
