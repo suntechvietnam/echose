@@ -27,7 +27,7 @@
     <draggable
       v-if="imageFiles.length > 0"
       v-model="imageFiles"
-      class="file-list file-list-flex"
+      class="file-list"
       ghost-class="ghost-item"
       chosen-class="chosen-item"
       drag-class="drag-item"
@@ -36,13 +36,12 @@
     >
       <template #item="{ element: file, index }">
         <div class="file-item">
-          <div class="file-item-info">
-            <img 
-              :src="imageUrls[file] || getImageUrl(file)" 
-              :alt="getImageFileName(file)"
-              class="file-item-image"
-              @error="handleImageError"
-            />
+          <div
+            class="file-item-info"
+            :style="{
+              backgroundImage: `url(${imageUrls[file] || getImageUrl(file)})`
+            }"
+          >
           </div>
           <button class="file-item-remove" @click="removeImageFile(index)" title="Xóa">✕</button>
         </div>
@@ -86,10 +85,6 @@ const isShowConfirm = ref(false)
 
 // Dùng cho vuedraggable: với array string, key chính là giá trị string
 const imageItemKey = (filePath) => filePath
-
-const getImageFileName = (filePath) => {
-  return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
-}
 
 const getImageUrl = (filePath) => {
   if (!filePath) return null
@@ -292,79 +287,52 @@ watch(() => props.modelValue, (newValue) => {
   font-weight: 500;
 }
 
-/* Flex layout for image list - natural wrapping */
-.file-list-flex {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: wrap !important;
-  gap: 0 !important;
+/* Layout danh sách (giống audio) */
+.file-list {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
   flex: 1;
-  align-content: flex-start;
 }
 
-/* File item in flex layout */
-.file-list-flex .file-item {
+.file-item {
   position: relative;
   display: flex;
-  margin-right: 4px;
-  background: white;
-  border-radius: 0;
-  border: 2px solid transparent;
+  flex-direction: column;
+  overflow: hidden;
   cursor: move;
-  transition: all 0.2s ease;
-  overflow: visible;
-  width: 120px;
-  flex-shrink: 0;
-  flex-grow: 0;
-  align-items: center;
-  justify-content: center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  background: transparent;
 }
 
-/* File item info container */
+
 .file-item-info {
-  display: block;
-  width: auto;
+  height: 100%;
+  min-height: 80px;
+  width: 100%;
+  position: relative;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 6px;
 }
 
-/* File item name text */
-.file-item-name {
-  font-size: 14px;
-  color: #1e293b;
-  word-break: break-all;
-}
-
-/* Image display */
-.file-item-image {
-  max-width: 120px;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  display: block;
-  padding: 0;
-  border: none;
-}
-
-/* Remove button */
 .file-item-remove {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  padding: 4px 8px;
+  top: 10px;
+  right: 10px;
+  padding: 2px 2px;
+  width: 25px;
+  height: 25px;
+  border: none;
   background: rgba(239, 68, 68, 0.9);
   color: white;
-  border: none;
   border-radius: 4px;
-  font-size: 12px;
-  font-weight: bold;
   cursor: pointer;
-  z-index: 10;
+  font-size: 10px;
   opacity: 0;
-  transition: opacity 0.2s ease;
-  width: auto;
-  height: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  transition: opacity 0.2s ease, background 0.2s ease;
+  z-index: 2;
 }
 
 .file-item:hover .file-item-remove {
@@ -379,17 +347,17 @@ watch(() => props.modelValue, (newValue) => {
 .ghost-item {
   opacity: 0.4;
   background: #e2e8f0;
-  border: 2px dashed #667eea;
+  border: 3px dashed #667eea;
 }
 
 .chosen-item {
-  opacity: 0.8;
-  transform: scale(0.98);
+  opacity: 0.9;
+  transform: scale(0.97);
   cursor: grabbing;
 }
 
 .drag-item {
   border: 2px solid #667eea !important;
-  box-shadow: 0 0 8px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 0 8px rgba(102, 126, 234, 0.4);
 }
 </style>
