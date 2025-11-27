@@ -302,7 +302,7 @@ watch(() => props.modelValue, (newValue) => {
 .file-list-flex .file-item {
   position: relative;
   display: flex;
-  margin: 3px;
+  margin-right: 4px;
   background: white;
   border-radius: 0;
   border: 2px solid transparent;
