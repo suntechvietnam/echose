@@ -439,7 +439,7 @@ const shuffleImages = () => {
   const shuffled = shuffleArray(imageFiles.value)
   imageFiles.value = shuffled
   
-  statusMessage.value = '✅ Đã sắp xếp ngẫu nhiên các ảnh'
+  statusMessage.value = '✅ Đã sắp xếp ngẫu nhiên các ảnhĐã sắp xếp ngẫu nhiên các ảnhĐã sắp xếp ngẫu nhiên các ảnhĐã sắp xếp ngẫu nhiên các ảnh'
   statusType.value = 'success'
 }
 

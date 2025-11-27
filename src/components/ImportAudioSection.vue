@@ -197,10 +197,8 @@ watch(audioFiles, (newFiles) => {
 .audio-selection-group {
   margin-top: 1.5rem;
   flex: 0 0 auto;
-  max-height: 300px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .file-selector {
@@ -270,8 +268,6 @@ watch(audioFiles, (newFiles) => {
   grid-template-columns: repeat(2, 1fr);
   gap: 0.75rem;
   flex: 1;
-  min-height: 0;
-  overflow-y: auto;
 }
 
 .file-item {
@@ -296,6 +292,7 @@ watch(audioFiles, (newFiles) => {
   flex-direction: column;
   gap: 0.25rem;
   flex: 1;
+  text-align: left;
 }
 
 .file-item-name {

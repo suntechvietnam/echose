@@ -3,7 +3,7 @@ use crate::utils::find_ffmpeg_by_os::run_ffmpeg;
 use crate::audio_to_text_ass::audio_to_ass;
 
 /// Tạo file caption từ audio path sử dụng Whisper
-async fn generate_caption_from_audio(audio_path: &str, video_aspect_ratio: &str) -> Result<String, String> {
+async fn generate_caption_from_audio(audio_path: &str) -> Result<String, String> {
     // Tạo đường dẫn output cho caption file
     let caption_output_path = format!("{}_caption.ass", 
         audio_path.rsplit_once('.').map(|(name, _)| name).unwrap_or(audio_path)
@@ -79,10 +79,9 @@ pub async fn merge_audio_with_caption(
     video_path: &str,
     audio_path: &str,
     output_path: &str,
-    video_aspect_ratio: &str,
 ) -> Result<(), String> {
     // Tạo caption từ audio path
-    let caption_path = generate_caption_from_audio(audio_path, video_aspect_ratio).await?;
+    let caption_path = generate_caption_from_audio(audio_path).await?;
     
     // Lấy duration của audio file
     let audio_duration = get_audio_duration(audio_path.to_string()).await
