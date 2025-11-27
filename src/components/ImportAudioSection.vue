@@ -38,19 +38,32 @@
     >
       <template #item="{ element: file, index }">
         <div class="file-item" :key="file">
-          <div class="file-item-info">
-            <span class="file-item-name">{{ getFileName(file) }}</span>
-            <span v-if="fileDurations[file]" class="file-item-duration">
-              <span class="duration-icon">⏱️</span> {{ formatDuration(fileDurations[file], { showSeconds: true, roundUp: false }) }}
-            </span>
-            <span v-else class="file-item-duration loading">
-              Loading time...
-            </span>
+          <div class="file-item-main">
+            <button 
+              class="file-item-play"
+              type="button"
+              @click.stop="togglePlay(file)"
+              :title="currentPlayingFile === file ? 'Dừng' : 'Nghe thử'"
+            >
+              {{ currentPlayingFile === file ? '⏸️' : '▶️' }}
+            </button>
+            <div class="file-item-info">
+              <span class="file-item-name">{{ getFileName(file) }}</span>
+              <span v-if="fileDurations[file]" class="file-item-duration">
+                <span class="duration-icon">⏱️</span> {{ formatDuration(fileDurations[file], { showSeconds: true, roundUp: false }) }}
+              </span>
+              <span v-else class="file-item-duration loading">
+                Loading time...
+              </span>
+            </div>
           </div>
           <button class="file-item-remove" @click="removeAudioFile(index)" title="Xóa">✕</button>
         </div>
       </template>
     </draggable>
+
+    <!-- Hidden audio element for preview -->
+    <audio ref="previewAudio" style="display: none" />
     
     <!-- Confirm Modal -->
     <ConfirmModal 
@@ -67,9 +80,10 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import draggable from 'vuedraggable'
 import { open } from '@tauri-apps/plugin-dialog'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { useAudioDuration } from '@/composables/useAudioDuration'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
@@ -87,6 +101,11 @@ const audioFiles = ref([...props.modelValue])
 const isShuffling = ref(false)
 const isShowConfirm = ref(false)
 
+// Preview audio state
+const audioUrls = ref({})
+const currentPlayingFile = ref(null)
+const previewAudio = ref(null)
+
 // Use composable for audio duration
 const { fileDurations, loadMultipleDurations, removeDuration, clearAllDurations, createTotalDuration } = useAudioDuration()
 
@@ -95,6 +114,20 @@ const totalDuration = createTotalDuration(audioFiles)
 
 const getFileName = (filePath) => {
   return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
+}
+
+const getAudioUrl = (filePath) => {
+  if (!filePath) return null
+  if (audioUrls.value[filePath]) return audioUrls.value[filePath]
+
+  try {
+    const url = convertFileSrc(filePath)
+    audioUrls.value[filePath] = url
+    return url
+  } catch (error) {
+    console.error('Error converting audio path:', error, filePath)
+    return null
+  }
 }
 
 /**
@@ -143,7 +176,6 @@ const formatDuration = (seconds, options = {}) => {
 }
 
 const selectAudioFiles = async () => {
-  console.log('🎵 selectAudioFiles called')
   try {
     const selected = await open({
       multiple: true,
@@ -152,33 +184,29 @@ const selectAudioFiles = async () => {
         extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg']
       }]
     })
-    
-    console.log('🎵 Selected files:', selected)
-    
-    if (selected) {
-      const files = Array.isArray(selected) ? selected : [selected]
-      console.log('🎵 Files array:', files)
-      
-      // Thêm các file mới vào danh sách (tránh trùng lặp)
-      const newFiles = []
-      for (const file of files) {
-        if (!audioFiles.value.includes(file)) {
-          audioFiles.value.push(file)
-          newFiles.push(file)
-        }
+
+    if (!selected) return
+
+    const files = Array.isArray(selected) ? selected : [selected]
+
+    // Thêm các file mới vào danh sách (tránh trùng lặp)
+    const newFiles = []
+    for (const file of files) {
+      if (!audioFiles.value.includes(file)) {
+        audioFiles.value.push(file)
+        newFiles.push(file)
       }
-      
-      console.log('🎵 New files:', newFiles)
-      console.log('🎵 Audio files after update:', audioFiles.value)
-      
-      // Load duration cho các file mới (song song)
-      if (newFiles.length > 0) {
-        loadMultipleDurations(newFiles)
-      }
-      
-      emit('update:audioFiles', audioFiles.value)
-      emit('audio-selected', audioFiles.value)
+      // Chuẩn bị URL preview
+      getAudioUrl(file)
     }
+
+    // Load duration cho các file mới (song song)
+    if (newFiles.length > 0) {
+      loadMultipleDurations(newFiles)
+    }
+
+    emit('update:audioFiles', audioFiles.value)
+    emit('audio-selected', audioFiles.value)
   } catch (error) {
     console.error('Lỗi khi chọn file nhạc:', error)
   }
@@ -186,6 +214,14 @@ const selectAudioFiles = async () => {
 
 const removeAudioFile = (index) => {
   const fileToRemove = audioFiles.value[index]
+
+  // Dừng nếu đang phát file này
+  if (currentPlayingFile.value === fileToRemove && previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value.src = ''
+    currentPlayingFile.value = null
+  }
+
   audioFiles.value.splice(index, 1)
   
   // Xóa duration khi xóa file
@@ -201,6 +237,13 @@ const clearAllAudio = () => {
 const confirmClearAll = () => {
   audioFiles.value = []
   clearAllDurations()
+  audioUrls.value = {}
+
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value.src = ''
+  }
+  currentPlayingFile.value = null
   emit('update:audioFiles', [])
   emit('audio-cleared')
   isShowConfirm.value = false
@@ -208,6 +251,29 @@ const confirmClearAll = () => {
 
 const cancelClearAll = () => {
   isShowConfirm.value = false
+}
+
+const togglePlay = async (filePath) => {
+  try {
+    if (!previewAudio.value || !filePath) return
+
+    // Nếu đang phát file này thì dừng
+    if (currentPlayingFile.value === filePath) {
+      previewAudio.value.pause()
+      currentPlayingFile.value = null
+      return
+    }
+
+    const url = getAudioUrl(filePath)
+    if (!url) return
+
+    // Chuyển sang file mới
+    previewAudio.value.src = url
+    await previewAudio.value.play()
+    currentPlayingFile.value = filePath
+  } catch (error) {
+    console.error('Lỗi khi preview audio:', error)
+  }
 }
 
 const shuffleAudio = async () => {
@@ -239,6 +305,13 @@ watch(audioFiles, (newFiles) => {
 watch(() => props.modelValue, (newValue) => {
   audioFiles.value = [...newValue]
 }, { deep: true })
+
+onUnmounted(() => {
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value.src = ''
+  }
+})
 
 </script>
 
@@ -338,9 +411,26 @@ watch(() => props.modelValue, (newValue) => {
   transition: all 0.2s ease;
 }
 
+.file-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
 .file-item:hover {
   border-color: #667eea;
   box-shadow: 0 2px 4px rgba(102, 126, 234, 0.1);
+}
+
+.file-item-play {
+  margin-right: 0.5rem;
+  padding: 0.1rem 0.4rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
 }
 
 .file-item-info {
@@ -349,6 +439,7 @@ watch(() => props.modelValue, (newValue) => {
   gap: 0.25rem;
   flex: 1;
   text-align: left;
+  min-width: 0;
 }
 
 .file-item-name {
