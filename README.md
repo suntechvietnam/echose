@@ -1,4 +1,4 @@
-# YTBFlow Desktop App
+# echose Desktop App
 
 Ứng dụng desktop được xây dựng bằng Tauri (Rust + Vue.js) với màn hình dashboard đơn giản.
 

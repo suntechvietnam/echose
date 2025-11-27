@@ -1,7 +1,7 @@
 {
-  productName: "YTBFlow",
+  productName: "echose",
   version: "0.1.0",
-  identifier: "com.ytbflow.app",
+  identifier: "com.echose",
   
   build: {
     beforeDevCommand: "npm run dev",
@@ -16,7 +16,7 @@
         fullscreen: false,
         resizable: true,
         maximized: true,
-        title: "YtbFlow - Nâng tầm hiệu suất",
+        title: "echose - Nâng tầm hiệu suất",
         minWidth: 800,
         minHeight: 600,
         dragDropEnabled: false,
@@ -33,11 +33,9 @@
   
   bundle: {
     active: true,
-    targets: ["msi", "nsis"],
+    // Windows: msi, nsis. macOS: dmg
+    targets: ["msi", "nsis", "dmg"],
     icon: [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico",
     ],

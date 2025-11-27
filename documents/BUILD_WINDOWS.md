@@ -1,6 +1,6 @@
 # Hướng Dẫn Build Windows Installer
 
-Có 3 cách để build Windows installer cho ứng dụng YTBFlow:
+Có 3 cách để build Windows installer cho ứng dụng echose:
 
 ## Cách 1: Sử dụng GitHub Actions (Khuyến nghị) ⭐
 
@@ -33,12 +33,12 @@ Có 3 cách để build Windows installer cho ứng dụng YTBFlow:
 
 ### File installer sẽ có ở:
 - **Trong GitHub Actions Artifacts:**
-  - `windows-installer-msi/YTBFlow_0.1.0_x64_en-US.msi` (MSI installer - khuyến nghị)
-  - `windows-installer-nsis/YTBFlow_0.1.0_x64-setup.exe` (NSIS installer)
+  - `windows-installer-msi/echose_0.1.0_x64_en-US.msi` (MSI installer - khuyến nghị)
+  - `windows-installer-nsis/echose_0.1.0_x64-setup.exe` (NSIS installer)
 
 - **Trong workflow runner (chỉ để tham khảo):**
-  - `src-tauri/target/release/bundle/msi/YTBFlow_0.1.0_x64_en-US.msi`
-  - `src-tauri/target/release/bundle/nsis/YTBFlow_0.1.0_x64-setup.exe`
+  - `src-tauri/target/release/bundle/msi/echose_0.1.0_x64_en-US.msi`
+  - `src-tauri/target/release/bundle/nsis/echose_0.1.0_x64-setup.exe`
 
 ## Cách 2: Build trên máy Windows
 
@@ -68,8 +68,8 @@ Nếu bạn có máy Windows hoặc Windows VM:
    ```
 
 4. **File installer** sẽ có ở:
-   - `src-tauri/target/release/bundle/msi/YTBFlow_0.1.0_x64_en-US.msi`
-   - `src-tauri/target/release/bundle/nsis/YTBFlow_0.1.0_x64-setup.exe`
+   - `src-tauri/target/release/bundle/msi/echose_0.1.0_x64_en-US.msi`
+   - `src-tauri/target/release/bundle/nsis/echose_0.1.0_x64-setup.exe`
 
 ## Cách 3: Cross-compile từ macOS (Nâng cao)
 

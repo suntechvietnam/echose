@@ -1,7 +1,7 @@
 {
-  "name": "ytbflow",
+  "name": "echose",
   "version": "0.1.0",
-  "description": "YTBFlow Desktop App",
+  "description": "echose ứng dụng xây video siêu nhanh",
   "type": "module",
   "scripts": {
     "dev": "vite",

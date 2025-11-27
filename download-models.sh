@@ -1,7 +1,7 @@
 #!/bin/bash
 # Download Whisper models for development
 
-echo "🎤 Downloading Whisper models for YTBFlow development..."
+echo "🎤 Downloading Whisper models for echose development..."
 
 MODELS_DIR="src-tauri/models"
 cd "$(dirname "$0")"

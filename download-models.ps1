@@ -1,6 +1,6 @@
 # Download Whisper models for development on Windows
 
-Write-Host "🎤 Downloading Whisper models for YTBFlow development..." -ForegroundColor Green
+Write-Host "🎤 Downloading Whisper models for echose development..." -ForegroundColor Green
 
 $ModelsDir = "src-tauri\models"
 

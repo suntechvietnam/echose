@@ -1,4 +1,4 @@
-# Whisper Models for YTBFlow
+# Whisper Models for echose
 
 This directory contains Whisper models for audio-to-text conversion.
 

@@ -253,7 +253,7 @@ pub async fn create_video_from_images(
         .as_secs();
     
     // Lưu vào output folder
-    let work_dir = output_path.join(format!("ytbflow_images_{}", timestamp));
+    let work_dir = output_path.join(format!("echose_images_{}", timestamp));
     fs::create_dir_all(&work_dir)
         .map_err(|e| format!("Lỗi khi tạo work directory: {}", e))?;
     

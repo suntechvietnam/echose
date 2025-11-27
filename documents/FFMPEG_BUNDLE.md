@@ -2,7 +2,7 @@
 
 ## Tổng quan
 
-Ứng dụng YTBFlow tự động bundle FFmpeg và FFprobe vào Windows installer, **người dùng không cần cài đặt FFmpeg trước**.
+Ứng dụng echose tự động bundle FFmpeg và FFprobe vào Windows installer, **người dùng không cần cài đặt FFmpeg trước**.
 
 ## Cách hoạt động
 
@@ -16,8 +16,8 @@ Workflow tự động:
 ### 2. Khi cài đặt trên máy người dùng
 
 Installer sẽ cài đặt FFmpeg vào:
-- `C:\Program Files\YTBFlow\resources\ffmpeg.exe`
-- `C:\Program Files\YTBFlow\resources\ffprobe.exe`
+- `C:\Program Files\echose\resources\ffmpeg.exe`
+- `C:\Program Files\echose\resources\ffprobe.exe`
 
 ### 3. Khi ứng dụng chạy
 
