@@ -176,7 +176,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { open } from '@tauri-apps/api/dialog'
+import { open } from '@tauri-apps/plugin-dialog'
 import { useTauri } from '../composables/useTauri'
 import { useAudioDuration } from '../composables/useAudioDuration'
 import ImportAudioSection from '@/components/ImportAudioSection.vue'
@@ -242,8 +242,6 @@ const selectOutputFolder = async () => {
     if (selected) {
       const folderPath = Array.isArray(selected) ? selected[0] : selected
       outputFolder.value = folderPath
-      statusMessage.value = '✅ Đã chọn thư mục: ' + folderPath
-      statusType.value = 'success'
     }
   } catch (error) {
     statusMessage.value = 'Lỗi khi chọn thư mục: ' + error

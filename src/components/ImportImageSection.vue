@@ -37,12 +37,11 @@
         <div class="file-item" :key="file">
           <div class="file-item-info">
             <img 
-              v-if="imageUrls[file]"
-              :src="imageUrls[file]" 
+              :src="imageUrls[file] || getImageUrl(file)" 
               :alt="getImageFileName(file)"
               class="file-item-image"
+              @error="handleImageError"
             />
-            <span v-else class="file-item-name">Đang tải ảnh...</span>
           </div>
           <button class="file-item-remove" @click="removeImageFile(index)" title="Xóa">✕</button>
         </div>
@@ -64,10 +63,10 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, watch } from 'vue'
+import { ref, watch } from 'vue'
 import draggable from 'vuedraggable'
-import { open } from '@tauri-apps/api/dialog'
-import { readBinaryFile } from '@tauri-apps/api/fs'
+import { open } from '@tauri-apps/plugin-dialog'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const props = defineProps({
@@ -79,7 +78,6 @@ const props = defineProps({
 
 const emit = defineEmits(['update:imageFiles', 'images-selected', 'images-cleared', 'status-message'])
 
-// Image files - store file paths, sync with parent
 const imageFiles = ref([...props.modelValue])
 const imageUrls = ref({})
 const isShuffling = ref(false)
@@ -89,88 +87,62 @@ const getImageFileName = (filePath) => {
   return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
 }
 
-const getMimeType = (filePath) => {
-  const ext = filePath.toLowerCase().split('.').pop()
-  const mimeTypes = {
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'webp': 'image/webp'
+const getImageUrl = (filePath) => {
+  if (!filePath) return null
+
+  if (imageUrls.value[filePath]) {
+    return imageUrls.value[filePath]
   }
-  return mimeTypes[ext] || 'image/jpeg'
-}
 
-const loadImageAsBlobUrl = async (filePath) => {
   try {
-    // Check if already loaded
-    if (imageUrls.value[filePath]) {
-      return imageUrls.value[filePath]
-    }
-
-    // Read file as binary
-    const fileData = await readBinaryFile(filePath)
-    
-    // Get MIME type
-    const mimeType = getMimeType(filePath)
-    
-    // Create Blob from binary data
-    const blob = new Blob([fileData], { type: mimeType })
-    
-    // Create Blob URL
-    const blobUrl = URL.createObjectURL(blob)
-    
-    // Cache the blob URL
-    imageUrls.value[filePath] = blobUrl
-    
-    return blobUrl
+    const url = convertFileSrc(filePath)
+    imageUrls.value[filePath] = url
+    return url
   } catch (error) {
-    console.error('Error loading image:', error, filePath)
+    console.error('Error converting file path:', error, filePath)
     return null
   }
 }
 
 const selectImageFiles = async () => {
   try {
-    // Sử dụng Tauri Dialog API - cách tốt nhất
-    // Native dialog, hỗ trợ Command+A/Ctrl+A, có path trực tiếp
     const selected = await open({
       multiple: true,
       filters: [{
         name: 'Images',
-        extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp']
+        extensions: ['jpg', 'jpeg', 'png', 'webp']
       }]
     })
     
-    if (selected) {
-      // selected có thể là string (single) hoặc string[] (multiple)
-      const files = Array.isArray(selected) ? selected : [selected]
-      
-      // Thêm các file mới vào danh sách (tránh trùng lặp)
-      for (const file of files) {
-        if (!imageFiles.value.includes(file)) {
-          imageFiles.value.push(file)
-          // Load image immediately
-          loadImageAsBlobUrl(file)
-        }
+    if (!selected) return
+
+    const files = Array.isArray(selected) ? selected : [selected]
+
+    for (const file of files) {
+      if (!imageFiles.value.includes(file)) {
+        imageFiles.value.push(file)
       }
-      
-      emit('update:imageFiles', imageFiles.value)
-      emit('images-selected', imageFiles.value)
+      getImageUrl(file)
     }
+
+    emit('update:imageFiles', imageFiles.value)
+    emit('images-selected', imageFiles.value)
   } catch (error) {
     emit('status-message', 'Lỗi khi chọn ảnh: ' + error, 'error')
   }
 }
 
+const handleImageError = (event) => {
+  console.error('Error loading image:', event?.target?.src)
+}
+
 const removeImageFile = (index) => {
   const fileToRemove = imageFiles.value[index]
-  // Cleanup blob URL để tránh memory leak
+  imageFiles.value.splice(index, 1)
+
   if (imageUrls.value[fileToRemove]) {
-    URL.revokeObjectURL(imageUrls.value[fileToRemove])
     delete imageUrls.value[fileToRemove]
   }
-  // Remove from array
-  imageFiles.value.splice(index, 1)
   
   emit('update:imageFiles', imageFiles.value)
 }
@@ -180,11 +152,6 @@ const clearAllImages = () => {
 }
 
 const confirmClearAll = () => {
-  // Cleanup tất cả blob URLs để tránh memory leak
-  Object.values(imageUrls.value).forEach(url => {
-    if (url) URL.revokeObjectURL(url)
-  })
-  // Clear arrays
   imageFiles.value = []
   imageUrls.value = {}
   
@@ -240,26 +207,14 @@ const shuffleImages = async () => {
   isShuffling.value = false
 }
 
-// Watch để emit khi imageFiles thay đổi
 watch(imageFiles, (newFiles) => {
   emit('update:imageFiles', newFiles)
-}, { deep: true })
+})
 
-// Watch để sync khi parent modelValue thay đổi
 watch(() => props.modelValue, (newValue) => {
   imageFiles.value = [...newValue]
-  // Reload images if needed
   newValue.forEach(file => {
-    if (!imageUrls.value[file]) {
-      loadImageAsBlobUrl(file)
-    }
-  })
-}, { deep: true })
-
-// Cleanup blob URLs khi component unmount để tránh memory leak
-onUnmounted(() => {
-  Object.values(imageUrls.value).forEach(url => {
-    if (url) URL.revokeObjectURL(url)
+    getImageUrl(file)
   })
 })
 </script>
@@ -354,7 +309,7 @@ onUnmounted(() => {
   cursor: move;
   transition: all 0.2s ease;
   overflow: visible;
-  width: 160px;
+  width: 120px;
   flex-shrink: 0;
   flex-grow: 0;
   align-items: center;
@@ -376,7 +331,7 @@ onUnmounted(() => {
 
 /* Image display */
 .file-item-image {
-  max-width: 150px;
+  max-width: 120px;
   width: auto;
   height: auto;
   object-fit: contain;

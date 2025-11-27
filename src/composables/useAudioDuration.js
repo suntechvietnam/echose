@@ -47,7 +47,7 @@ export function useAudioDuration() {
       // Ưu tiên dùng Rust backend với ffprobe (nhanh hơn nhiều)
       // Fallback về JavaScript nếu Rust backend không có
       try {
-        const { invoke } = await import('@tauri-apps/api/tauri')
+        const { invoke } = await import('@tauri-apps/api/core')
         const duration = await invoke('get_audio_duration', { filePath })
         
         if (duration && !isNaN(duration) && duration > 0 && isFinite(duration)) {
@@ -59,8 +59,8 @@ export function useAudioDuration() {
       }
       
       // Fallback: Dùng JavaScript HTML5 Audio API (chậm hơn với file lớn)
-      const { readBinaryFile } = await import('@tauri-apps/api/fs')
-      const fileData = await readBinaryFile(filePath)
+      const { readFile } = await import('@tauri-apps/plugin-fs')
+      const fileData = await readFile(filePath, { encoding: null })
       
       // Xác định MIME type
       const mimeType = getMimeType(filePath)

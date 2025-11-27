@@ -14,10 +14,17 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::collections::HashMap;
 
-fn main() {
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn main() {
     let processes: ProcessStore = Arc::new(Mutex::new(HashMap::new()));
     
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
         .manage(processes)
         .invoke_handler(tauri::generate_handler![
             // Mở thư mục bằng file explorer mặc định

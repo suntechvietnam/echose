@@ -69,7 +69,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import draggable from 'vuedraggable'
-import { open } from '@tauri-apps/api/dialog'
+import { open } from '@tauri-apps/plugin-dialog'
 import { useAudioDuration } from '@/composables/useAudioDuration'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 

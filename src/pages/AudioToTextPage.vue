@@ -121,9 +121,9 @@
 
 <script setup>
 import { ref } from 'vue'
-import { open, save } from '@tauri-apps/api/dialog'
-import { invoke } from '@tauri-apps/api/tauri'
-import { readTextFile, writeTextFile } from '@tauri-apps/api/fs'
+import { open, save } from '@tauri-apps/plugin-dialog'
+import { invoke } from '@tauri-apps/api/core'
+import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { useAudioDuration } from '@/composables/useAudioDuration'
 import '@/assets/css/image-to-video.css'
 import '@/assets/css/audio-to-text.css'
