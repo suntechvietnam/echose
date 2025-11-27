@@ -54,8 +54,8 @@
                 <button class="btn-select-file btn-copy" @click="copyToClipboard">
                   📋 Sao chép
                 </button>
-                <button class="btn-select-file btn-download" @click="downloadText">
-                  💾 Tải xuống
+                <button class="btn-select-file btn-download" @click="openOutputFolder">
+                  💾 Mở thư mục
                 </button>
               </div>
             </div>
@@ -120,7 +120,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref } from 'vue'
 import { open, save } from '@tauri-apps/api/dialog'
 import { invoke } from '@tauri-apps/api/tauri'
 import { readTextFile, writeTextFile } from '@tauri-apps/api/fs'
@@ -140,12 +140,12 @@ const isConverting = ref(false)
 const convertedText = ref(``)
 const statusMessage = ref('')
 const statusType = ref('info')
+const outputFilePath = ref('')
 
 // Output options
 const outputFormat = ref('txt')
 const outputFormats = [
   { value: 'txt', name: 'TXT', desc: 'Văn bản', icon: '📄' },
-  { value: 'srt', name: 'SRT', desc: 'Caption đơn giản', icon: '🎬' },
   { value: 'ass', name: 'ASS', desc: 'Caption nâng cao', icon: '💬' },
 ]
 
@@ -240,6 +240,7 @@ const clearMedia = () => {
   mediaFile.value = null
   fileDuration.value = null
   convertedText.value = ''
+  outputFilePath.value = ''
   statusMessage.value = '✅ Đã xóa file'
   statusType.value = 'success'
 }
@@ -273,8 +274,9 @@ const handleConvert = async () => {
     // Đọc file đã tạo
     const content = await readTextFile(outputPath)
     convertedText.value = content
+    outputFilePath.value = outputPath
     
-    statusMessage.value = `✅ Chuyển đổi hoàn tất! File ${outputFormat.value.toUpperCase()} đã được tạo tại: ${outputPath}`
+    statusMessage.value = `✅ Chuyển đổi hoàn tất! File ${outputFormat.value.toUpperCase()} đã được tạo`
     statusType.value = 'success'
   } catch (error) {
     console.error('Lỗi khi chuyển đổi:', error)
@@ -299,46 +301,24 @@ const copyToClipboard = async () => {
   }
 }
 
-const downloadText = async () => {
-  if (!convertedText.value) return
+const openOutputFolder = async () => {
+  if (!outputFilePath.value) {
+    statusMessage.value = '❌ Chưa có file output để mở thư mục'
+    statusType.value = 'error'
+    return
+  }
   
   try {
-    // Tạo tên file mặc định từ file input
-    let defaultName = `caption.${outputFormat.value}`
-    if (mediaFile.value) {
-      const inputName = getFileName(mediaFile.value)
-      const baseName = inputName.replace(/\.[^/.]+$/, '') // Bỏ extension
-      defaultName = `${baseName}_caption.${outputFormat.value}`
-    }
-    
-    // Tạo filter tương ứng với format
-    const formatFilters = {
-      txt: { name: 'Text File', extensions: ['txt'] },
-      srt: { name: 'SRT Subtitle', extensions: ['srt'] },
-      ass: { name: 'ASS Subtitle', extensions: ['ass'] },
-      vtt: { name: 'WebVTT Subtitle', extensions: ['vtt'] },
-      json: { name: 'JSON File', extensions: ['json'] }
-    }
-    
-    // Mở dialog để chọn nơi lưu file
-    const savePath = await save({
-      defaultPath: defaultName,
-      filters: [
-        formatFilters[outputFormat.value] || { name: 'Text File', extensions: ['txt'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
+    // Gọi command để mở thư mục chứa file
+    await invoke('open_folder', { 
+      path: outputFilePath.value 
     })
     
-    if (savePath) {
-      // Ghi nội dung vào file
-      await writeTextFile(savePath, convertedText.value)
-      
-      statusMessage.value = `✅ Đã lưu file thành công: ${savePath}`
-      statusType.value = 'success'
-    }
+    statusMessage.value = '✅ Đã mở thư mục chứa file'
+    statusType.value = 'success'
   } catch (error) {
-    console.error('Lỗi khi lưu file:', error)
-    statusMessage.value = `❌ Lỗi khi lưu file: ${error}`
+    console.error('Lỗi khi mở thư mục:', error)
+    statusMessage.value = `❌ Lỗi khi mở thư mục: ${error}`
     statusType.value = 'error'
   }
 }

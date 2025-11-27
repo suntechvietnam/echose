@@ -27,58 +27,17 @@
             </div>
           </div>
 
-          <div class="file-group image-selection-group">
-            <h3 class="form-label">Danh sách ảnh</h3>
-            <div class="file-selector">
-              <button class="btn-select-file" @click="selectImageFiles">
-                📁 Chọn Ảnh
-              </button>
-              <button 
-                v-if="imageFiles.length > 0"
-                class="btn-clear-all" 
-                @click="clearAllImages"
-              >
-                🗑️ Xóa Tất Cả
-              </button>
-              <button 
-                v-if="imageFiles.length > 1"
-                class="btn-shuffle-images" 
-                @click="shuffleImages"
-              >
-                🔀 Sắp Xếp Ngẫu Nhiên
-              </button>
-              <span class="file-count">{{ imageFiles.length }} ảnh đã chọn</span>
-            </div>
-          
-            <!-- Danh sách ảnh -->
-            <draggable
-              v-if="imageFiles.length > 0"
-              v-model="imageFiles"
-              class="file-list file-list-flex"
-              ghost-class="ghost-item"
-              chosen-class="chosen-item"
-              drag-class="drag-item"
-              :animation="200"
-            >
-              <template #item="{ element: file, index }">
-                <div class="file-item" :key="file">
-                  <div class="file-item-info">
-                    <img 
-                      v-if="imageUrls[file]"
-                      :src="imageUrls[file]" 
-                      :alt="getImageFileName(file)"
-                      class="file-item-image"
-                    />
-                    <span v-else class="file-item-name">Đang tải ảnh...</span>
-                  </div>
-                  <button class="file-item-remove" @click="removeImageFile(index)" title="Xóa">✕</button>
-                </div>
-              </template>
-            </draggable>
-          </div>
+          <ImportImageSection 
+            :modelValue="imageFiles"
+            @update:imageFiles="handleImageFilesUpdate"
+            @images-selected="handleImagesSelected"
+            @images-cleared="handleImagesCleared"
+            @status-message="handleStatusMessage"
+          />
 
           <!-- Audio Selection Section -->
           <ImportAudioSection 
+            :modelValue="audioFiles"
             @update:audioFiles="handleAudioFilesUpdate"
             @audio-selected="handleAudioSelected"
             @audio-cleared="handleAudioCleared"
@@ -204,24 +163,20 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, watch } from 'vue'
-import draggable from 'vuedraggable'
+import { ref } from 'vue'
 import { open } from '@tauri-apps/api/dialog'
-import { readBinaryFile } from '@tauri-apps/api/fs'
 import { useTauri } from '../composables/useTauri'
 import { useAudioDuration } from '../composables/useAudioDuration'
 import ImportAudioSection from '@/components/ImportAudioSection.vue'
+import ImportImageSection from '@/components/ImportImageSection.vue'
 import VideoEffect from '@/components/VideoEffect.vue'
 import '../assets/css/image-to-video.css'
-
-
 
 const { callCommand } = useTauri()
 const { loadFileDuration } = useAudioDuration()
 
 // Image files - store file paths
 const imageFiles = ref([])
-const imageUrls = ref({})
 
 // Audio files - store file paths
 const audioFiles = ref([])
@@ -260,149 +215,6 @@ const videoHistory = ref([])
 
 const changeVideoAspectRatio = (aspectRatio) => {
   videoAspectRatio.value = aspectRatio
-}
-
-watch(videoAspectRatio, (oldVal, newVal) => {
-  if (oldVal !== newVal) {
-    clearAllImages()
-  }
-})
-
-const getImageFileName = (filePath) => {
-  return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
-}
-
-const getMimeType = (filePath) => {
-  const ext = filePath.toLowerCase().split('.').pop()
-  const mimeTypes = {
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'webp': 'image/webp'
-  }
-  return mimeTypes[ext] || 'image/jpeg'
-}
-
-const loadImageAsBlobUrl = async (filePath) => {
-  try {
-    // Check if already loaded
-    if (imageUrls.value[filePath]) {
-      return imageUrls.value[filePath]
-    }
-
-    // Read file as binary
-    const fileData = await readBinaryFile(filePath)
-    
-    // Get MIME type
-    const mimeType = getMimeType(filePath)
-    
-    // Create Blob from binary data
-    const blob = new Blob([fileData], { type: mimeType })
-    
-    // Create Blob URL
-    const blobUrl = URL.createObjectURL(blob)
-    
-    // Cache the blob URL
-    imageUrls.value[filePath] = blobUrl
-    
-    return blobUrl
-  } catch (error) {
-    console.error('Error loading image:', error, filePath)
-    return null
-  }
-}
-
-const selectImageFiles = async () => {
-  try {
-    // Sử dụng Tauri Dialog API - cách tốt nhất
-    // Native dialog, hỗ trợ Command+A/Ctrl+A, có path trực tiếp
-    const selected = await open({
-      multiple: true,
-      filters: [{
-        name: 'Images',
-        extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp']
-      }]
-    })
-    
-    if (selected) {
-      // selected có thể là string (single) hoặc string[] (multiple)
-      const files = Array.isArray(selected) ? selected : [selected]
-      
-      // Thêm các file mới vào danh sách (tránh trùng lặp)
-      for (const file of files) {
-        if (!imageFiles.value.includes(file)) {
-          imageFiles.value.push(file)
-          // Load image immediately
-          loadImageAsBlobUrl(file)
-        }
-      }
-      
-      statusType.value = 'success'
-    }
-  } catch (error) {
-    statusMessage.value = 'Lỗi khi chọn ảnh: ' + error
-    statusType.value = 'error'
-  }
-}
-
-const removeImageFile = (index) => {
-  const fileToRemove = imageFiles.value[index]
-  // Cleanup blob URL để tránh memory leak
-  if (imageUrls.value[fileToRemove]) {
-    URL.revokeObjectURL(imageUrls.value[fileToRemove])
-    delete imageUrls.value[fileToRemove]
-  }
-  // Remove from array
-  imageFiles.value.splice(index, 1)
-}
-
-const clearAllImages = () => {
-  // Cleanup tất cả blob URLs để tránh memory leak
-  Object.values(imageUrls.value).forEach(url => {
-    if (url) URL.revokeObjectURL(url)
-  })
-  // Clear arrays
-  imageFiles.value = []
-  imageUrls.value = {}
-  statusMessage.value = '✅ Đã xóa tất cả ảnh'
-  statusType.value = 'success'
-}
-
-const shuffleImages = () => {
-  if (imageFiles.value.length <= 1) return
-  
-  // Fisher-Yates shuffle algorithm với kiểm tra không trùng lặp liên tiếp
-  const shuffleArray = (array) => {
-    const shuffled = [...array]
-    let attempts = 0
-    const maxAttempts = 100
-    
-    do {
-      // Fisher-Yates shuffle
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-      }
-      attempts++
-    } while (hasConsecutiveDuplicates(shuffled) && attempts < maxAttempts)
-    
-    return shuffled
-  }
-  
-  const hasConsecutiveDuplicates = (arr) => {
-    for (let i = 0; i < arr.length - 1; i++) {
-      if (arr[i] === arr[i + 1]) {
-        return true
-      }
-    }
-    return false
-  }
-  
-  const shuffled = shuffleArray(imageFiles.value)
-  imageFiles.value = shuffled
-  
-  statusMessage.value = '✅ Đã sắp xếp ngẫu nhiên các ảnhĐã sắp xếp ngẫu nhiên các ảnhĐã sắp xếp ngẫu nhiên các ảnhĐã sắp xếp ngẫu nhiên các ảnh'
-  statusType.value = 'success'
 }
 
 const selectOutputFolder = async () => {
@@ -469,12 +281,6 @@ const createVideoFromImages = async () => {
         statusType.value = 'error'
         return
       }
-      
-      statusMessage.value = `✅ Audio hợp lệ: ${Math.round(totalAudioTime)}s >= ${totalVideoTime}s`
-      statusType.value = 'success'
-      
-      // Delay một chút để user thấy message
-      await new Promise(resolve => setTimeout(resolve, 1000))
       
     } catch (error) {
       statusMessage.value = '❌ Lỗi khi kiểm tra audio: ' + error
@@ -590,29 +396,36 @@ const openVideoFolderFromPath = async () => {
   }
 }
 
+// Image handlers
+const handleImageFilesUpdate = (files) => {
+  imageFiles.value = files
+}
+
+const handleImagesSelected = (files) => {
+  statusType.value = 'success'
+}
+
+const handleImagesCleared = () => {
+  // Clear any related state if needed
+}
+
+const handleStatusMessage = (message, type) => {
+  statusMessage.value = message
+  statusType.value = type
+}
+
 // Audio handlers
 const handleAudioFilesUpdate = (files) => {
-  console.log('🎵 Audio files updated:', files)
   audioFiles.value = files
 }
 
 const handleAudioSelected = (files) => {
-  statusMessage.value = `✅ Đã chọn ${files.length} file nhạc`
-  statusType.value = 'success'
+  // Không cần thông báo khi chọn audio
 }
 
 const handleAudioCleared = () => {
-  statusMessage.value = '✅ Đã xóa tất cả file nhạc'
-  statusType.value = 'success'
+  // Không cần thông báo khi xóa audio
 }
 
-
-
-// Cleanup blob URLs khi component unmount để tránh memory leak
-onUnmounted(() => {
-  Object.values(imageUrls.value).forEach(url => {
-    if (url) URL.revokeObjectURL(url)
-  })
-})
 </script>
 

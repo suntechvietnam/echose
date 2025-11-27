@@ -16,8 +16,9 @@
         v-if="audioFiles.length > 1"
         class="btn-shuffle-images" 
         @click="shuffleAudio"
+        :disabled="isShuffling"
       >
-        🔀 Sắp Xếp Ngẫu Nhiên
+        {{ isShuffling ? 'Đang sắp xếp...' : '🔀 Sắp Xếp Ngẫu Nhiên' }}
       </button>
       <span class="file-count">Đang có {{ audioFiles.length }} files</span>
       <span v-if="audioFiles.length > 0" class="total-duration-inline">
@@ -50,6 +51,18 @@
         </div>
       </template>
     </draggable>
+    
+    <!-- Confirm Modal -->
+    <ConfirmModal 
+      v-if="isShowConfirm"
+      :title="'Xác nhận xóa'"
+      :message="`Bạn có chắc muốn xóa tất cả file audio?`"
+      :type="'warning'"
+      :confirmText="'Xóa'"
+      :cancelText="'Hủy'"
+      @confirm="confirmClearAll"
+      @cancel="cancelClearAll"
+    />
   </div>
 </template>
 
@@ -58,11 +71,21 @@ import { ref, watch } from 'vue'
 import draggable from 'vuedraggable'
 import { open } from '@tauri-apps/api/dialog'
 import { useAudioDuration } from '@/composables/useAudioDuration'
+import ConfirmModal from '@/components/ConfirmModal.vue'
+
+const props = defineProps({
+  modelValue: {
+    type: Array,
+    default: () => []
+  }
+})
 
 const emit = defineEmits(['update:audioFiles', 'audio-selected', 'audio-cleared'])
 
-// Audio files
-const audioFiles = ref([])
+// Audio files - sync with parent
+const audioFiles = ref([...props.modelValue])
+const isShuffling = ref(false)
+const isShowConfirm = ref(false)
 
 // Use composable for audio duration
 const { fileDurations, loadMultipleDurations, removeDuration, clearAllDurations, createTotalDuration } = useAudioDuration()
@@ -120,6 +143,7 @@ const formatDuration = (seconds, options = {}) => {
 }
 
 const selectAudioFiles = async () => {
+  console.log('🎵 selectAudioFiles called')
   try {
     const selected = await open({
       multiple: true,
@@ -129,8 +153,11 @@ const selectAudioFiles = async () => {
       }]
     })
     
+    console.log('🎵 Selected files:', selected)
+    
     if (selected) {
       const files = Array.isArray(selected) ? selected : [selected]
+      console.log('🎵 Files array:', files)
       
       // Thêm các file mới vào danh sách (tránh trùng lặp)
       const newFiles = []
@@ -140,6 +167,9 @@ const selectAudioFiles = async () => {
           newFiles.push(file)
         }
       }
+      
+      console.log('🎵 New files:', newFiles)
+      console.log('🎵 Audio files after update:', audioFiles.value)
       
       // Load duration cho các file mới (song song)
       if (newFiles.length > 0) {
@@ -165,14 +195,28 @@ const removeAudioFile = (index) => {
 }
 
 const clearAllAudio = () => {
+  isShowConfirm.value = true
+}
+
+const confirmClearAll = () => {
   audioFiles.value = []
   clearAllDurations()
   emit('update:audioFiles', [])
   emit('audio-cleared')
+  isShowConfirm.value = false
 }
 
-const shuffleAudio = () => {
-  if (audioFiles.value.length <= 1) return
+const cancelClearAll = () => {
+  isShowConfirm.value = false
+}
+
+const shuffleAudio = async () => {
+  if (audioFiles.value.length <= 1 || isShuffling.value) return
+  
+  isShuffling.value = true
+  
+  // Delay nhỏ để hiển thị loading state
+  await new Promise(resolve => setTimeout(resolve, 300))
   
   const shuffled = [...audioFiles.value]
   // Fisher-Yates shuffle algorithm
@@ -182,11 +226,18 @@ const shuffleAudio = () => {
   }
   audioFiles.value = shuffled
   emit('update:audioFiles', audioFiles.value)
+  
+  isShuffling.value = false
 }
 
 // Watch để emit khi audioFiles thay đổi
 watch(audioFiles, (newFiles) => {
   emit('update:audioFiles', newFiles)
+}, { deep: true })
+
+// Watch để sync khi parent modelValue thay đổi
+watch(() => props.modelValue, (newValue) => {
+  audioFiles.value = [...newValue]
 }, { deep: true })
 
 </script>

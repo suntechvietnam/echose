@@ -65,51 +65,7 @@
 
 
 
-.image-selection-group {
-    display: flex;
-    flex-direction: column;
-    min-height: 200px;
-}
 
-.file-selector {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
-}
-
-.btn-clear-all {
-    padding: 8px 16px;
-    background: #ef4444;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-.btn-clear-all:hover {
-    background: #dc2626;
-}
-
-.btn-shuffle-images {
-    padding: 8px 16px;
-    background: #10b981;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-.btn-shuffle-images:hover {
-    background: #059669;
-}
 
 /* Right column - Options and controls */
 .image-to-video-right-column {
@@ -119,106 +75,7 @@
     gap: 16px;
 }
 
-/* Flex layout for image list - natural wrapping */
-.file-list-flex {
-    display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: wrap !important;
-    gap: 0 !important;
-    flex: 1;
-    align-content: flex-start;
-}
 
-/* File item in flex layout */
-.file-list-flex .file-item {
-    position: relative;
-    display: flex;
-    margin: 3px;
-    background: white;
-    border-radius: 0;
-    border: 2px solid transparent;
-    cursor: move;
-    transition: all 0.2s ease;
-    overflow: visible;
-    width: 160px;
-    flex-shrink: 0;
-    flex-grow: 0;
-    align-items: center;
-    justify-content: center;
-}
-
-/* File item info container */
-.file-item-info {
-    display: block;
-    width: auto;
-}
-
-/* File item name text */
-.file-item-name {
-    font-size: 14px;
-    color: #1e293b;
-    word-break: break-all;
-}
-
-/* Image display */
-.file-item-image {
-    max-width: 150px;
-    width: auto;
-    height: auto;
-    object-fit: contain;
-    display: block;
-    padding: 0;
-    border: none;
-}
-
-/* Remove button */
-.file-item-remove {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    padding: 4px 8px;
-    background: rgba(239, 68, 68, 0.9);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: bold;
-    cursor: pointer;
-    z-index: 10;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-    width: auto;
-    height: auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.file-item:hover .file-item-remove {
-    opacity: 1;
-}
-
-.file-item-remove:hover {
-    background: rgba(220, 38, 38, 1);
-}
-
-/* Drag and drop styles */
-.ghost-item {
-    opacity: 0.4;
-    background: #e2e8f0;
-    border: 2px dashed #667eea;
-}
-
-.chosen-item {
-    opacity: 0.8;
-    transform: scale(0.98);
-    cursor: grabbing;
-}
-
-.drag-item {
-    border: 2px solid #667eea !important;
-    box-shadow: 0 0 8px rgba(102, 126, 234, 0.3);
-}
 
 .video-history-actions {
     display: flex;

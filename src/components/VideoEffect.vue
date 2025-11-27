@@ -15,7 +15,6 @@
         <img 
           v-if="effect.preview && (hoveredEffect === effect.value || selectedEffect === effect.value)"
           :src="effect.preview" 
-          :alt="effect.name"
           class="effect-preview-image"
           @error="handleImageError"
           loading="lazy"
