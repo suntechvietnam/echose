@@ -111,6 +111,7 @@
                   type="checkbox" 
                   id="auto-caption-checkbox"
                   v-model="isAutoCaption"
+                  @click="handleAutoCaptionClick"
                   class="checkbox-input"
                 />
                 <label for="auto-caption-checkbox" class="checkbox-label">
@@ -159,6 +160,17 @@
         </div>
       </div>
     </div>
+    
+    <!-- Audio Required Modal -->
+    <ConfirmModal 
+      v-if="isShowAudioRequiredModal"
+      :title="'Thông báo'"
+      :message="'Bạn cần chọn file audio để dùng tính năng auto caption'"
+      :type="'info'"
+      :confirmText="'OK'"
+      :cancelText="''"
+      @confirm="closeAudioRequiredModal"
+    />
   </div>
 </template>
 
@@ -170,6 +182,7 @@ import { useAudioDuration } from '../composables/useAudioDuration'
 import ImportAudioSection from '@/components/ImportAudioSection.vue'
 import ImportImageSection from '@/components/ImportImageSection.vue'
 import VideoEffect from '@/components/VideoEffect.vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 import '../assets/css/image-to-video.css'
 
 const { callCommand } = useTauri()
@@ -206,6 +219,7 @@ const isAutoCaption = ref(false)
 const isCreating = ref(false)
 const statusMessage = ref('')
 const statusType = ref('info')
+const isShowAudioRequiredModal = ref(false)
 const progress = ref(0)
 const currentProcessId = ref(null)
 const videoFolderPath = ref(null)
@@ -414,9 +428,26 @@ const handleStatusMessage = (message, type) => {
   statusType.value = type
 }
 
+const handleAutoCaptionClick = (event) => {
+  if (event.target.checked && audioFiles.value.length === 0) {
+    event.preventDefault()
+    isAutoCaption.value = false // Reset checkbox
+    isShowAudioRequiredModal.value = true
+  }
+}
+
+const closeAudioRequiredModal = () => {
+  isShowAudioRequiredModal.value = false
+}
+
 // Audio handlers
 const handleAudioFilesUpdate = (files) => {
   audioFiles.value = files
+  
+  // Tự động uncheck auto caption khi không còn audio files
+  if (files.length === 0 && isAutoCaption.value) {
+    isAutoCaption.value = false
+  }
 }
 
 const handleAudioSelected = (files) => {
@@ -424,7 +455,10 @@ const handleAudioSelected = (files) => {
 }
 
 const handleAudioCleared = () => {
-  // Không cần thông báo khi xóa audio
+  // Tự động uncheck auto caption khi xóa tất cả audio
+  if (isAutoCaption.value) {
+    isAutoCaption.value = false
+  }
 }
 
 </script>

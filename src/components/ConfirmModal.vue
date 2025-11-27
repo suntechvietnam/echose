@@ -18,6 +18,7 @@
       
       <div class="modal-footer">
         <button 
+          v-if="cancelText"
           class="btn btn-cancel" 
           @click="handleCancel"
           :disabled="loading"

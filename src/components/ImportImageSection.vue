@@ -48,6 +48,18 @@
         </div>
       </template>
     </draggable>
+    
+    <!-- Confirm Modal -->
+    <ConfirmModal 
+      v-if="isShowConfirm"
+      :title="'Xác nhận xóa'"
+      :message="`Bạn có chắc muốn xóa tất cả ${imageFiles.length} ảnh?`"
+      :type="'warning'"
+      :confirmText="'Xóa'"
+      :cancelText="'Hủy'"
+      @confirm="confirmClearAll"
+      @cancel="cancelClearAll"
+    />
   </div>
 </template>
 
@@ -56,6 +68,7 @@ import { ref, onUnmounted, watch } from 'vue'
 import draggable from 'vuedraggable'
 import { open } from '@tauri-apps/api/dialog'
 import { readBinaryFile } from '@tauri-apps/api/fs'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const props = defineProps({
   modelValue: {
@@ -70,6 +83,7 @@ const emit = defineEmits(['update:imageFiles', 'images-selected', 'images-cleare
 const imageFiles = ref([...props.modelValue])
 const imageUrls = ref({})
 const isShuffling = ref(false)
+const isShowConfirm = ref(false)
 
 const getImageFileName = (filePath) => {
   return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
@@ -162,6 +176,10 @@ const removeImageFile = (index) => {
 }
 
 const clearAllImages = () => {
+  isShowConfirm.value = true
+}
+
+const confirmClearAll = () => {
   // Cleanup tất cả blob URLs để tránh memory leak
   Object.values(imageUrls.value).forEach(url => {
     if (url) URL.revokeObjectURL(url)
@@ -172,7 +190,11 @@ const clearAllImages = () => {
   
   emit('update:imageFiles', [])
   emit('images-cleared')
-  emit('status-message', '✅ Đã xóa tất cả ảnh', 'success')
+  isShowConfirm.value = false
+}
+
+const cancelClearAll = () => {
+  isShowConfirm.value = false
 }
 
 const shuffleImages = async () => {
@@ -181,7 +203,7 @@ const shuffleImages = async () => {
   isShuffling.value = true
   
   // Delay nhỏ để hiển thị loading state
-  await new Promise(resolve => setTimeout(resolve, 100))
+  await new Promise(resolve => setTimeout(resolve, 300))
   
   // Fisher-Yates shuffle algorithm với kiểm tra không trùng lặp liên tiếp
   const shuffleArray = (array) => {
