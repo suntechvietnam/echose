@@ -401,27 +401,15 @@ jobs:
           Write-Host "Tauri CLI version:"
           npx tauri --version
           
-          # Check if tauri.conf.json is valid
-          Write-Host "`nTauri configuration check:"
-          if (Test-Path "src-tauri\tauri.conf.json") {
-            Write-Host "✓ tauri.conf.json exists"
-            try {
-              $config = Get-Content "src-tauri\tauri.conf.json" | ConvertFrom-Json
-              Write-Host "✓ tauri.conf.json is valid JSON"
-              
-              if ($config.tauri.bundle) {
-                Write-Host "Bundle configuration found:"
-                Write-Host "  Active: $($config.tauri.bundle.active)"
-                Write-Host "  Targets: $($config.tauri.bundle.targets -join ', ')"
-                Write-Host "  Identifier: $($config.tauri.bundle.identifier)"
-              } else {
-                Write-Host "✗ No bundle configuration found!"
-              }
-            } catch {
-              Write-Host "✗ tauri.conf.json is invalid: $_"
-            }
+          # Check Tauri v2 config (tauri.conf.json5)
+          Write-Host "`nTauri configuration check (v2, tauri.conf.json5):"
+          $configPath = "src-tauri\tauri.conf.json5"
+          if (Test-Path $configPath) {
+            Write-Host "✓ tauri.conf.json5 exists at $configPath"
+            Write-Host "`nFirst 40 lines of config (for debugging):"
+            Get-Content $configPath -TotalCount 40 | ForEach-Object { Write-Host "  $_" }
           } else {
-            Write-Host "✗ tauri.conf.json not found!"
+            Write-Host "✗ tauri.conf.json5 not found at $configPath"
           }
           
           # Test the build command manually first
