@@ -19,6 +19,7 @@
         title: "YtbFlow - Nâng tầm hiệu suất",
         minWidth: 800,
         minHeight: 600,
+        dragDropEnabled: false,
       },
     ],
     security: {

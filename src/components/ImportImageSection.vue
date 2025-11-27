@@ -32,9 +32,10 @@
       chosen-class="chosen-item"
       drag-class="drag-item"
       :animation="200"
+      :item-key="imageItemKey"
     >
       <template #item="{ element: file, index }">
-        <div class="file-item" :key="file">
+        <div class="file-item">
           <div class="file-item-info">
             <img 
               :src="imageUrls[file] || getImageUrl(file)" 
@@ -82,6 +83,9 @@ const imageFiles = ref([...props.modelValue])
 const imageUrls = ref({})
 const isShuffling = ref(false)
 const isShowConfirm = ref(false)
+
+// Dùng cho vuedraggable: với array string, key chính là giá trị string
+const imageItemKey = (filePath) => filePath
 
 const getImageFileName = (filePath) => {
   return filePath.split('/').pop() || filePath.split('\\').pop() || filePath
