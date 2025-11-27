@@ -123,33 +123,10 @@
               </select>
             </div>
 
-            <div class="form-group video-effect-group">
-              <label class="form-label">✨ Hiệu ứng video</label>
-              <div class="effect-preview-grid">
-                <div 
-                  v-for="effect in videoEffectOptions" 
-                  :key="effect.value"
-                  :class="['effect-preview-item', { active: videoEffectType === effect.value }]"
-                  @click="videoEffectType = effect.value"
-                  :title="effect.name"
-                >
-                  <img 
-                    v-if="effect.preview"
-                    :src="effect.preview" 
-                    :alt="effect.name"
-                    class="effect-preview-image"
-                    @error="handleImageError"
-                    loading="lazy"
-                  />
-                  <div v-else class="effect-preview-fallback">
-                    {{ effect.name.substring(0, 2) }}
-                  </div>
-                  <div v-if="videoEffectType === effect.value" class="effect-check-icon">
-                    ✓
-                  </div>
-                </div>
-              </div>
-            </div>
+            <VideoEffect 
+              :selectedEffect="videoEffectType"
+              @update:selectedEffect="videoEffectType = $event"
+            />
           </div>
 
           <div class="file-group">
@@ -234,24 +211,10 @@ import { readBinaryFile } from '@tauri-apps/api/fs'
 import { useTauri } from '../composables/useTauri'
 import { useAudioDuration } from '../composables/useAudioDuration'
 import ImportAudioSection from '@/components/ImportAudioSection.vue'
+import VideoEffect from '@/components/VideoEffect.vue'
 import '../assets/css/image-to-video.css'
 
-// Import effect images
-import noneImg from '../assets/img/effects/none.png'
-import circleopenImg from '../assets/img/effects/circleopen.gif'
-import diagbrImg from '../assets/img/effects/diagbr.gif'
-import diagtlImg from '../assets/img/effects/diagtl.gif'
-import diagtrImg from '../assets/img/effects/diagtr.gif'
-import dissolveImg from '../assets/img/effects/dissolve.gif'
-import hlsliceImg from '../assets/img/effects/hlslice.gif'
-import hlwindImg from '../assets/img/effects/hlwind.gif'
-import hrsliceImg from '../assets/img/effects/hrslice.gif'
-import hrwindImg from '../assets/img/effects/hrwind.gif'
-import radialImg from '../assets/img/effects/radial.gif'
-import vdsliceImg from '../assets/img/effects/vdslice.gif'
-import vdwindImg from '../assets/img/effects/vdwind.gif'
-import vusliceImg from '../assets/img/effects/vuslice.gif'
-import vuwindImg from '../assets/img/effects/vuwind.gif'
+
 
 const { callCommand } = useTauri()
 const { loadFileDuration } = useAudioDuration()
@@ -280,23 +243,7 @@ const imageEffectOptions = [
   { name: 'Pan', value: 'pan' },
 ]
 
-const videoEffectOptions = [
-  { name: 'None', value: 'none', preview: noneImg },
-  { name: 'Circle Open', value: 'circleopen', preview: circleopenImg },
-  { name: 'Diagonal Bottom Right', value: 'diagbr', preview: diagbrImg },
-  { name: 'Diagonal Top Left', value: 'diagtl', preview: diagtlImg },
-  { name: 'Diagonal Top Right', value: 'diagtr', preview: diagtrImg },
-  { name: 'Dissolve', value: 'dissolve', preview: dissolveImg },
-  { name: 'Horizontal Left Slice', value: 'hlslice', preview: hlsliceImg },
-  { name: 'Horizontal Left Wind', value: 'hlwind', preview: hlwindImg },
-  { name: 'Horizontal Right Slice', value: 'hrslice', preview: hrsliceImg },
-  { name: 'Horizontal Right Wind', value: 'hrwind', preview: hrwindImg },
-  { name: 'Radial', value: 'radial', preview: radialImg },
-  { name: 'Vertical Down Slice', value: 'vdslice', preview: vdsliceImg },
-  { name: 'Vertical Down Wind', value: 'vdwind', preview: vdwindImg },
-  { name: 'Vertical Up Slice', value: 'vuslice', preview: vusliceImg },
-  { name: 'Vertical Up Wind', value: 'vuwind', preview: vuwindImg },
-]
+
 
 // Output
 const outputFolder = ref('')
@@ -659,12 +606,7 @@ const handleAudioCleared = () => {
   statusType.value = 'success'
 }
 
-const handleImageError = (event) => {
-  // Handle error when effect preview image fails to load
-  console.warn('Failed to load effect preview image:', event.target.src)
-  // Optionally hide the image or show a placeholder
-  event.target.style.display = 'none'
-}
+
 
 // Cleanup blob URLs khi component unmount để tránh memory leak
 onUnmounted(() => {
