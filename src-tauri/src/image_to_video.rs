@@ -227,6 +227,7 @@ pub async fn create_video_from_images(
     video_effect_type: String,
     audio_files: Vec<String>,
     output_folder: String,
+    is_auto_caption: bool,
     _processes: tauri::State<'_, ProcessStore>,  // Reserved for future use
 ) -> Result<String, String> {
     if image_files.is_empty() {
@@ -439,7 +440,7 @@ pub async fn create_video_from_images(
             &final_video_path,
             &merged_audio_path,
             &final_with_audio_path_str,
-            true, // has_caption = true by default
+            is_auto_caption, // Use user's choice for auto caption
         ).await.map_err(|e| format!("Lỗi khi merge video với audio: {}", e))?;
         
         // Xóa file audio tạm nếu đã merge nhiều file

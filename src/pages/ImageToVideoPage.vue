@@ -168,6 +168,20 @@
                 </button>
               </div>
             </div>
+            
+            <div class="form-group auto-caption-group">
+              <div class="checkbox-container">
+                <input 
+                  type="checkbox" 
+                  id="auto-caption-checkbox"
+                  v-model="isAutoCaption"
+                  class="checkbox-input"
+                />
+                <label for="auto-caption-checkbox" class="checkbox-label">
+                  🎬 Auto caption
+                </label>
+              </div>
+            </div>
           </div>
 
           <!-- Button tạo video -->
@@ -286,6 +300,7 @@ const videoEffectOptions = [
 
 // Output
 const outputFolder = ref('')
+const isAutoCaption = ref(false)
 const isCreating = ref(false)
 const statusMessage = ref('')
 const statusType = ref('info')
@@ -545,7 +560,8 @@ const createVideoFromImages = async () => {
       videoAspectRatio: videoAspectRatio.value,
       videoEffectType: videoEffectType.value,
       audioFiles: audioFiles.value,
-      outputFolder: outputFolder.value.trim()
+      outputFolder: outputFolder.value.trim(),
+      isAutoCaption: isAutoCaption.value
     })
     
     progress.value = 100

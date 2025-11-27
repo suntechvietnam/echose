@@ -20,6 +20,9 @@
         🔀 Sắp Xếp Ngẫu Nhiên
       </button>
       <span class="file-count">Đang có {{ audioFiles.length }} files</span>
+      <span v-if="audioFiles.length > 0" class="total-duration-inline">
+        Thời lượng: {{ formatDuration(totalDuration) }}
+      </span>
     </div>
 
     <!-- Danh sách file nhạc -->
@@ -47,11 +50,6 @@
         </div>
       </template>
     </draggable>
-
-    <!-- Tổng thời lượng -->
-    <div v-if="audioFiles.length > 0" class="total-duration">
-      <strong>Tổng thời lượng: {{ formatDuration(totalDuration) }}</strong>
-    </div>
   </div>
 </template>
 
@@ -199,6 +197,7 @@ watch(audioFiles, (newFiles) => {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+  min-height: 200px;
 }
 
 .file-selector {
@@ -261,6 +260,12 @@ watch(audioFiles, (newFiles) => {
   font-size: 14px;
   color: #64748b;
   font-weight: 500;
+}
+
+.total-duration-inline {
+  font-size: 14px;
+  color: #667eea;
+  font-weight: 600;
 }
 
 .file-list {
@@ -342,14 +347,7 @@ watch(audioFiles, (newFiles) => {
   background: #cc0000;
 }
 
-.total-duration {
-  margin-top: 1rem;
-  padding: 0.75rem;
-  background: #f0f0f0;
-  border-radius: 4px;
-  text-align: center;
-  color: #333;
-}
+
 
 /* Drag and drop styles */
 .ghost-item {

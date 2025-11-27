@@ -158,10 +158,9 @@
 }
 
 .image-selection-group {
-    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    min-height: 400px;
+    min-height: 200px;
 }
 
 .file-selector {
@@ -351,4 +350,38 @@
 
 .video-effect-group {
     margin-top: 15px;
+}
+
+/* Auto caption checkbox styles */
+.auto-caption-group {
+    margin-top: 12px;
+}
+
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.checkbox-input {
+    width: 18px;
+    height: 18px;
+    accent-color: #667eea;
+    cursor: pointer;
+}
+
+.checkbox-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.checkbox-label:hover {
+    color: #667eea;
 }

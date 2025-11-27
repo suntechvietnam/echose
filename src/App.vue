@@ -2,8 +2,8 @@
   <div class="app-container">
     <Sidebar :current-page="currentPage" @navigate="handleNavigate" />
     <main class="main-content">
-      <ImageToVideoPage v-if="currentPage === 'image-to-video'" />
-      <AudioToTextPage v-if="currentPage === 'audio-to-text'" />
+      <ImageToVideoPage v-show="currentPage === 'image-to-video'" />
+      <AudioToTextPage v-show="currentPage === 'audio-to-text'" />
     </main>
   </div>
 </template>

@@ -69,9 +69,8 @@
       {
         "fullscreen": false,
         "resizable": true,
+        "maximized": true,
         "title": "YtbFlow - Nâng tầm hiệu suất",
-        "width": 1200,
-        "height": 800,
         "minWidth": 800,
         "minHeight": 600
       }
