@@ -44,6 +44,20 @@
       "resources/mac/*",
       "models/*",
     ],
+    macOS: {
+      // Code signing identity (Developer ID hoặc Apple Development)
+      // Để trống nếu không có certificate, script sẽ dùng ad-hoc signing
+      // Ví dụ: "Developer ID Application: Your Name (TEAM_ID)"
+      // signingIdentity: null,
+      // Provisioning profile (nếu cần)
+      // provisioningProfile: null,
+      // Minimum macOS version
+      minimumSystemVersion: "10.15",
+      // Exception domains cho hardened runtime
+      exceptionDomain: [],
+      // Frameworks và libraries cần signing
+      frameworks: [],
+    },
   },
   
   plugins: {},
