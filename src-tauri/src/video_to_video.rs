@@ -6,6 +6,35 @@ use std::fs;
 use std::io::Write;
 use std::process::Command;
 use uuid::Uuid;
+use futures::future;
+
+/// Helper function để tạo timestamp
+fn get_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// Helper function để lấy duration của nhiều video files song song
+async fn get_video_durations(video_files: &[String]) -> Result<Vec<f64>, String> {
+    if video_files.is_empty() {
+        return Err("Danh sách video rỗng".to_string());
+    }
+    
+    // Nếu chỉ có 1 video, không cần tạo futures và join_all
+    if video_files.len() == 1 {
+        let duration = get_video_duration(&video_files[0]).await?;
+        return Ok(vec![duration]);
+    }
+    
+    // Nhiều video: lấy durations song song
+    let futures: Vec<_> = video_files.iter()
+        .map(|path| get_video_duration(path))
+        .collect();
+    
+    future::try_join_all(futures).await
+}
 
 /// Helper function để lấy duration của video file bằng ffprobe
 async fn get_video_duration(video_path: &str) -> Result<f64, String> {
@@ -57,6 +86,65 @@ async fn get_video_duration(video_path: &str) -> Result<f64, String> {
 fn build_base_scale(width: i32, height: i32) -> String {
     format!("scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2", 
         width, height, width, height)
+}
+
+/**
+ * Chuẩn bị video trước khi ghép: normalize resolution, framerate, codec và tùy chọn xóa audio
+ * Tất cả videos sẽ được scale về cùng resolution
+ */
+async fn prepare_video_before_merge(
+    video_path: &str,
+    output_path: &str,
+    target_width: i32,
+    target_height: i32,
+    crf: &str,
+    remove_audio: bool,
+) -> Result<(), String> {
+    let scale_filter = build_base_scale(target_width, target_height);
+    
+    let mut cmd = run_ffmpeg()?;
+    cmd.arg("-i")
+        .arg(video_path)
+        .arg("-vf")
+        .arg(&scale_filter)
+        .arg("-r")
+        .arg("30") // Normalize framerate về 30fps
+        .arg("-vsync")
+        .arg("cfr") // Constant framerate
+        .arg("-c:v")
+        .arg("libx264")
+        .arg("-preset")
+        .arg("medium")
+        .arg("-crf")
+        .arg(crf)
+        .arg("-pix_fmt")
+        .arg("yuv420p")
+        .arg("-g")
+        .arg("60") // GOP size = 2x framerate
+        .arg("-bf")
+        .arg("2")
+        .arg("-refs")
+        .arg("4");
+    
+    // Chỉ xóa audio nếu remove_audio = true
+    if remove_audio {
+        cmd.arg("-an"); // Xóa audio
+    } else {
+        cmd.arg("-c:a").arg("copy"); // Copy audio stream nếu có
+    }
+    
+    cmd.arg("-y")
+        .arg(output_path);
+    
+    let output = cmd.output().await
+        .map_err(|e| format!("Lỗi khi chuẩn bị video: {}", e))?;
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Lỗi khi chuẩn bị video: {}", error_msg));
+    }
+    
+    Ok(())
 }
 
 /// Ghép trực tiếp các video với scale và concat trong một lần chạy ffmpeg
@@ -211,10 +299,7 @@ pub async fn merge_videos(
     }
     
     // Tạo timestamp để tránh conflict
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let timestamp = get_timestamp();
     
     // Xác định resolution dựa trên chất lượng và aspect ratio
     let (base_width, base_height) = match video_quality.as_str() {
@@ -350,9 +435,24 @@ async fn concat_without_effects_fast(
     }
     
     if segment_files.len() == 1 {
-        // Chỉ có 1 segment, copy trực tiếp
-        fs::copy(&segment_files[0], output_path)
-            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
+        // Chỉ có 1 segment, xóa audio và copy video stream
+        let mut cmd = run_ffmpeg()?;
+        cmd.arg("-i")
+            .arg(&segment_files[0])
+            .arg("-c:v")
+            .arg("copy") // Copy video stream - không re-encode
+            .arg("-an") // Xóa audio stream gốc
+            .arg("-y")
+            .arg(output_path);
+        
+        let output = cmd.output().await
+            .map_err(|e| format!("Lỗi khi xóa audio từ video: {}", e))?;
+        
+        if !output.status.success() {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Lỗi khi xóa audio từ video: {}", error_msg));
+        }
+        
         return Ok(());
     }
     
@@ -373,8 +473,7 @@ async fn concat_without_effects_fast(
         .arg(concat_list_file.to_string_lossy().as_ref())
         .arg("-c:v")
         .arg("copy") // Copy video stream - không re-encode, rất nhanh
-        .arg("-c:a")
-        .arg("copy") // Copy audio stream nếu có
+        .arg("-an") // Xóa audio stream gốc - không ảnh hưởng performance vì chỉ bỏ qua audio
         .arg("-y")
         .arg(output_path);
     
@@ -474,9 +573,24 @@ async fn concat_with_pipeline_approach(
     }
     
     if segment_files.len() == 1 {
-        // Chỉ có 1 segment, copy trực tiếp
-        fs::copy(&segment_files[0], output_path)
-            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
+        // Chỉ có 1 segment, xóa audio và copy video stream
+        let mut cmd = run_ffmpeg()?;
+        cmd.arg("-i")
+            .arg(&segment_files[0])
+            .arg("-c:v")
+            .arg("copy") // Copy video stream - không re-encode
+            .arg("-an") // Xóa audio stream gốc
+            .arg("-y")
+            .arg(output_path);
+        
+        let output = cmd.output().await
+            .map_err(|e| format!("Lỗi khi xóa audio từ video: {}", e))?;
+        
+        if !output.status.success() {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Lỗi khi xóa audio từ video: {}", error_msg));
+        }
+        
         return Ok(());
     }
     
@@ -485,10 +599,7 @@ async fn concat_with_pipeline_approach(
     let work_dir = output_path_buf.parent()
         .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
     
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let timestamp = get_timestamp();
     
     let pipeline_work_dir = work_dir.join(format!("pipeline_temp_{}", timestamp));
     fs::create_dir_all(&pipeline_work_dir)
@@ -672,50 +783,79 @@ async fn concat_videos_with_transitions(
     transition_duration: f64,
     output_path: &str,
     crf: &str,
+    target_width: i32,
+    target_height: i32,
+    remove_original_audio: bool,
 ) -> Result<(), String> {
     if video_files.is_empty() {
         return Err("Cần ít nhất một video".to_string());
     }
     
-    if video_files.len() == 1 {
-        // Chỉ có 1 video, copy trực tiếp
-        fs::copy(&video_files[0], output_path)
-            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
-        return Ok(());
-    }
-    
-    // Nếu không có hiệu ứng, dùng concat demuxer
-    if video_effect_type == "none" {
-        return concat_without_effects_fast(video_files.to_vec(), output_path).await;
-    }
-    
-    // Có hiệu ứng: dùng pipeline approach với actual durations
     let output_path_buf = PathBuf::from(output_path);
     let work_dir = output_path_buf.parent()
         .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
     
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let timestamp = get_timestamp();
+    let prepare_dir = work_dir.join(format!("prepare_temp_{}", timestamp));
+    fs::create_dir_all(&prepare_dir)
+        .map_err(|e| format!("Lỗi khi tạo prepare directory: {}", e))?;
     
+    // Bước 1: Prepare tất cả videos về cùng resolution, framerate, codec và xóa audio
+    let mut prepared_videos = Vec::new();
+    for (idx, video_file) in video_files.iter().enumerate() {
+        let prepared_path = prepare_dir.join(format!("prepared_{:04}.mp4", idx));
+        let prepared_path_str = prepared_path.to_string_lossy().to_string();
+        
+        prepare_video_before_merge(
+            video_file,
+            &prepared_path_str,
+            target_width,
+            target_height,
+            crf,
+            remove_original_audio,
+        ).await.map_err(|e| format!("Lỗi khi chuẩn bị video {}: {}", idx + 1, e))?;
+        
+        prepared_videos.push(prepared_path_str);
+    }
+    
+    if video_files.len() == 1 {
+        // Chỉ có 1 video, copy prepared video vào output
+        fs::copy(&prepared_videos[0], output_path)
+            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&prepare_dir);
+        return Ok(());
+    }
+    
+    // Nếu không có hiệu ứng, dùng concat demuxer với prepared videos
+    if video_effect_type == "none" {
+        let result = concat_without_effects_fast(prepared_videos, output_path).await;
+        
+        // Cleanup
+        let _ = fs::remove_dir_all(&prepare_dir);
+        return result;
+    }
+    
+    // Có hiệu ứng: dùng pipeline approach với actual durations
     let pipeline_work_dir = work_dir.join(format!("pipeline_temp_{}", timestamp));
     fs::create_dir_all(&pipeline_work_dir)
         .map_err(|e| format!("Lỗi khi tạo pipeline work directory: {}", e))?;
     
-    // Lấy duration của video đầu tiên
-    let first_video_duration = get_video_duration(&video_files[0]).await?;
+    // Lấy tất cả durations từ prepared videos (sẽ giống nhau vì đã normalize)
+    let video_durations = get_video_durations(&prepared_videos).await?;
     
     // Bước 1: Ghép video đầu tiên với video thứ 2
     let current_output = pipeline_work_dir.join("pipeline_000.mp4");
     let mut current_output_str = current_output.to_string_lossy().to_string();
     
-    let second_video_duration = get_video_duration(&video_files[1]).await?;
+    let first_video_duration = video_durations[0];
+    let second_video_duration = video_durations[1];
     let mut current_duration = first_video_duration + second_video_duration - transition_duration;
     
     merge_two_videos_with_transition(
-        &video_files[0],
-        &video_files[1],
+        &prepared_videos[0],
+        &prepared_videos[1],
         &current_output_str,
         video_effect_type,
         transition_duration,
@@ -725,11 +865,11 @@ async fn concat_videos_with_transitions(
     ).await.map_err(|e| format!("Lỗi khi ghép video 1-2: {}", e))?;
     
     // Bước 2: Ghép output hiện tại với các video tiếp theo
-    for (idx, next_video) in video_files.iter().enumerate().skip(2) {
+    for (idx, next_video) in prepared_videos.iter().enumerate().skip(2) {
         let next_output = pipeline_work_dir.join(format!("pipeline_{:03}.mp4", idx));
         let next_output_str = next_output.to_string_lossy().to_string();
         
-        let next_video_duration = get_video_duration(next_video).await?;
+        let next_video_duration = video_durations[idx];
         
         merge_two_videos_with_transition(
             &current_output_str,
@@ -762,6 +902,9 @@ async fn concat_videos_with_transitions(
     // Bước 5: Xóa thư mục pipeline tạm
     let _ = fs::remove_dir_all(&pipeline_work_dir);
     
+    // Bước 6: Cleanup prepared videos directory
+    let _ = fs::remove_dir_all(&prepare_dir);
+    
     Ok(())
 }
 
@@ -776,6 +919,9 @@ pub async fn create_video_from_video(
     crf: String,
     is_has_auto_caption: bool,
     video_effect_type: String,
+    video_quality: String,
+    video_aspect_ratio: String,
+    remove_original_audio: bool,
 ) -> Result<String, String> {
     if video_files.is_empty() {
         return Err("Cần ít nhất một video".to_string());
@@ -790,16 +936,30 @@ pub async fn create_video_from_video(
         return Err("Thư mục output không hợp lệ".to_string());
     }
     
+    // Xác định resolution target dựa trên video_quality và video_aspect_ratio (giống merge_videos)
+    let (base_width, base_height) = match video_quality.as_str() {
+        "hd" => (1280, 720),      // HD 720p
+        "fullhd" => (1920, 1080), // Full HD 1080p
+        "2K" => (2048, 1080),     // 2K
+        "4K" => (3840, 2160),     // 4K
+        _ => (1920, 1080),        // Default Full HD
+    };
+    
+    // Áp dụng aspect ratio: 9:16 (dọc) hoặc 16:9 (ngang)
+    let (target_width, target_height) = match video_aspect_ratio.as_str() {
+        "9:16" => (base_height, base_width), // Swap cho video dọc (9:16)
+        "16:9" => (base_width, base_height),  // Giữ nguyên cho video ngang (16:9)
+        _ => (base_width, base_height),       // Default 16:9
+    };
+    
     // Transition duration mặc định (1 giây)
     let transition_duration = 1.0;
     
+    // Tạo timestamp một lần để reuse
+    let timestamp = get_timestamp();
+    
     // Bước 1: Concat videos với transitions
-    let temp_video_path = output_dir.join(format!("temp_concat_{}.mp4", 
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    ));
+    let temp_video_path = output_dir.join(format!("temp_concat_{}.mp4", timestamp));
     let temp_video_path_str = temp_video_path.to_string_lossy().to_string();
     
     concat_videos_with_transitions(
@@ -808,6 +968,9 @@ pub async fn create_video_from_video(
         transition_duration,
         &temp_video_path_str,
         &crf,
+        target_width,
+        target_height,
+        remove_original_audio,
     ).await?;
     
     // Bước 2: Xử lý audio nếu có
@@ -817,12 +980,7 @@ pub async fn create_video_from_video(
         
         // Merge audio files nếu có nhiều hơn 1 file
         let merged_audio_path = if audio_files_count > 1 {
-            let merged_audio_filename = format!("merged_audio_{}.mp3", 
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-            );
+            let merged_audio_filename = format!("merged_audio_{}.mp3", timestamp);
             let merged_audio_file = output_dir.join(&merged_audio_filename);
             let merged_audio_path_str = merged_audio_file.to_string_lossy().to_string();
             

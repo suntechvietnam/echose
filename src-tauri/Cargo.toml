@@ -28,6 +28,7 @@ dirs = "5.0"
 rand = "0.8"
 lazy_static = "1.4"
 uuid = { version = "1.0", features = ["v4"] }
+futures = "0.3"
 # Speech-to-text với whisper-rs (bindings cho whisper.cpp)
 whisper-rs = "0.15.1"
 hound = "3.5"  # Đọc WAV files

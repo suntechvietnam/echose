@@ -1,6 +1,11 @@
 <template>
   <div class="file-group video-selection-group">
-    <h3 class="form-label">Danh sách video</h3>
+    <h3 class="form-label">
+      Danh sách video 
+      <span class="video-count-badge" v-if="videoFiles.length > 0">
+        (đang có {{ videoFiles.length }} video)
+      </span>
+    </h3>
     <div class="file-selector">
       <button class="btn-select-file" @click="selectVideoFiles">
         🎬 Chọn video
@@ -20,7 +25,19 @@
       >
         {{ isShuffling ? 'Đang sắp xếp...' : '🔀 Sắp xếp ngẫu nhiên' }}
       </button>
-      <span class="file-count">{{ videoFiles.length }} video đã chọn</span>
+      <div 
+        v-if="videoFiles.length > 0"
+        class="checkbox-container-inline"
+      >
+        <input 
+          type="checkbox" 
+          id="mute-original-audio-checkbox"
+          v-model="removeOriginalAudio"
+          @change="handleRemoveAudioChange"
+          class="checkbox-input"
+        />
+        <label for="mute-original-audio-checkbox" class="checkbox-label">Xóa audio gốc</label>
+      </div>
     </div>
   
     <!-- Danh sách video -->
@@ -101,7 +118,10 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:videoFiles', 'videos-selected', 'videos-cleared', 'status-message'])
+const emit = defineEmits(['update:videoFiles', 'videos-selected', 'videos-cleared', 'status-message', 'update:removeOriginalAudio'])
+
+// State cho checkbox xóa audio gốc
+const removeOriginalAudio = ref(false)
 
 const videoFiles = ref([...props.modelValue])
 const videoUrls = ref({})
@@ -285,6 +305,10 @@ const shuffleVideos = async () => {
   isShuffling.value = false
 }
 
+const handleRemoveAudioChange = () => {
+  emit('update:removeOriginalAudio', removeOriginalAudio.value)
+}
+
 watch(() => props.modelValue, (newValue) => {
   videoFiles.value = [...newValue]
   newValue.forEach(file => {
@@ -298,6 +322,35 @@ watch(() => props.modelValue, (newValue) => {
   display: flex;
   flex-direction: column;
   min-height: 200px;
+}
+
+.checkbox-container-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.checkbox-container-inline .checkbox-input {
+  width: 18px;
+  height: 18px;
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.checkbox-container-inline .checkbox-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.checkbox-container-inline .checkbox-label:hover {
+  color: #667eea;
 }
 
 .file-selector {
@@ -354,6 +407,13 @@ watch(() => props.modelValue, (newValue) => {
 
 .btn-shuffle-videos:hover {
   background: #059669;
+}
+
+.video-count-badge {
+  font-size: 14px;
+  font-weight: 400;
+  color: #64748b;
+  margin-left: 4px;
 }
 
 .file-count {

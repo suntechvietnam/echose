@@ -18,6 +18,7 @@
             @videos-selected="handleVideosSelected"
             @videos-cleared="handleVideosCleared"
             @status-message="handleStatusMessage"
+            @update:removeOriginalAudio="handleRemoveOriginalAudioUpdate"
           />
 
           <!-- Audio Selection Section -->
@@ -157,6 +158,9 @@ const videoFiles = ref([])
 // Audio files - store file paths
 const audioFiles = ref([])
 
+// Remove original audio from videos
+const removeOriginalAudio = ref(false)
+
 // Configuration (vẫn giữ giống trang ImageToVideoPage, nhưng không hiển thị UI thời gian / hiệu ứng ảnh)
 const imageDuration = ref(6)
 const durationOptions = [5, 6, 7, 8, 10, 12, 15, 20, 30]
@@ -295,7 +299,10 @@ const createVideoFromVideos = async () => {
       outputPath: outputPath,
       crf: crf,
       isHasAutoCaption: isAutoCaption.value,
-      videoEffectType: videoEffectType.value
+      videoEffectType: videoEffectType.value,
+      videoQuality: videoQuality.value,
+      videoAspectRatio: videoAspectRatio.value,
+      removeOriginalAudio: removeOriginalAudio.value
     })
     
     progress.value = 100
@@ -388,6 +395,10 @@ const handleVideosCleared = () => {
 const handleStatusMessage = (message, type) => {
   statusMessage.value = message
   statusType.value = type
+}
+
+const handleRemoveOriginalAudioUpdate = (value) => {
+  removeOriginalAudio.value = value
 }
 
 const handleAutoCaptionClick = (event) => {
