@@ -23,6 +23,17 @@
           <a 
             href="#" 
             class="menu-item" 
+            :class="{ active: currentPage === 'video-to-video' }"
+            @click.prevent="handleClick('video-to-video')"
+          >
+            <span class="menu-icon">🎞️</span>
+            <span class="menu-text">Ghép video</span>
+          </a>
+        </li>
+        <li>
+          <a 
+            href="#" 
+            class="menu-item" 
             :class="{ active: currentPage === 'audio-to-text' }"
             @click.prevent="handleClick('audio-to-text')"
           >

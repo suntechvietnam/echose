@@ -9,7 +9,22 @@
     "core:default",
     "dialog:allow-open",
     "notification:allow-is-permission-granted",
-    "fs:allow-read-text-file"
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    }
   ]
 }
 

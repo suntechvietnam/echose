@@ -8,6 +8,7 @@ mod filesystem;
 mod image_to_video;
 mod process;
 mod utils;
+mod video_to_video;
 
 use process::ProcessStore;
 use std::sync::Arc;
@@ -32,6 +33,8 @@ pub fn main() {
             // Image to video
             image_to_video::create_video_from_images,
             image_to_video::stop_image_video_creation,
+            // Video to video
+            video_to_video::create_video_from_video,
             // Audio utilities
             file_audio::get_audio_duration,
             // Audio to text (whisper-rs) - ASS format

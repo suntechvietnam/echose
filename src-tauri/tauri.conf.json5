@@ -54,7 +54,8 @@
       // Minimum macOS version
       minimumSystemVersion: "10.15",
       // Exception domains cho hardened runtime
-      exceptionDomain: [],
+      // null nếu không có domain đặc biệt, hoặc một chuỗi domain (ví dụ: "example.com")
+      exceptionDomain: null,
       // Frameworks và libraries cần signing
       frameworks: [],
     },

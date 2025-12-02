@@ -3,6 +3,7 @@
     <Sidebar :current-page="currentPage" @navigate="handleNavigate" />
     <main class="main-content">
       <ImageToVideoPage v-show="currentPage === 'image-to-video'" />
+      <VideoToVideoPage v-show="currentPage === 'video-to-video'" />
       <AudioToTextPage v-show="currentPage === 'audio-to-text'" />
     </main>
   </div>
@@ -12,6 +13,7 @@
 import { ref } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import ImageToVideoPage from './pages/ImageToVideoPage.vue'
+import VideoToVideoPage from './pages/VideoToVideoPage.vue'
 import AudioToTextPage from './pages/AudioToTextPage.vue'
 
 const currentPage = ref('image-to-video')

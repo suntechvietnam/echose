@@ -1,22 +1,22 @@
 <template>
   <div class="page-content">
     <div class="page-header">
-      <h2>Tạo video từ ảnh</h2>
+      <h2>Ghép video</h2>
     </div>
     <div class="page-body image-to-video-container">
       <!-- Layout 2 cột -->
       <div class="image-to-video-layout">
-        <!-- Cột trái: Chọn và hiển thị danh sách ảnh -->
+        <!-- Cột trái: Chọn và hiển thị danh sách video -->
         <div class="image-to-video-left-column">
           <VideoAspectRatioSection
             v-model="videoAspectRatio"
           />
 
-          <ImportImageSection 
-            :modelValue="imageFiles"
-            @update:imageFiles="handleImageFilesUpdate"
-            @images-selected="handleImagesSelected"
-            @images-cleared="handleImagesCleared"
+          <ImportVideoSection 
+            :modelValue="videoFiles"
+            @update:videoFiles="handleVideoFilesUpdate"
+            @videos-selected="handleVideosSelected"
+            @videos-cleared="handleVideosCleared"
             @status-message="handleStatusMessage"
           />
 
@@ -31,30 +31,7 @@
 
         <!-- Cột phải: Options và controls -->
         <div class="image-to-video-right-column">
-          <!-- Cấu hình video -->
-          <div class="file-group">
-            <div class="form-group">
-              <div class="form-group image-settings-group">
-                <div class="image-settings-item">
-                  <label class="form-label">⏱️ Thời gian mỗi ảnh</label>
-                  <select v-model="imageDuration" class="form-select">
-                    <option v-for="duration in durationOptions" :key="duration" :value="duration">
-                      {{ duration }} giây
-                    </option>
-                  </select>
-                </div>
-
-                <div class="image-settings-item">
-                  <label class="form-label">✨ Hiệu ứng ảnh</label>
-                  <select v-model="imageEffectType" class="form-select">
-                    <option v-for="imageEffect in imageEffectOptions" :key="imageEffect.value" :value="imageEffect.value">
-                      {{ imageEffect.name }}
-                    </option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- Ở trang ghép video không hiển thị cấu hình "Thời gian mỗi ảnh" và "Hiệu ứng ảnh" -->
 
           <div class="file-group">
             <div class="form-group">
@@ -94,12 +71,12 @@
               <div class="checkbox-container">
                 <input 
                   type="checkbox" 
-                  id="auto-caption-checkbox"
+                  id="auto-caption-checkbox-v2v"
                   v-model="isAutoCaption"
                   @click="handleAutoCaptionClick"
                   class="checkbox-input"
                 />
-                <label for="auto-caption-checkbox" class="checkbox-label">
+                <label for="auto-caption-checkbox-v2v" class="checkbox-label">
                   🎬 Auto caption
                 </label>
               </div>
@@ -110,10 +87,10 @@
           <div class="form-actions">
             <button 
               class="btn-create-video" 
-              @click="createVideoFromImages" 
+              @click="createVideoFromVideos" 
               :disabled="isCreating"
             >
-              {{ isCreating ? 'Đang tạo video...' : 'Tạo Video' }}
+              {{ isCreating ? 'Đang ghép video...' : 'Ghép video' }}
             </button>
             <button 
               v-if="isCreating"
@@ -165,7 +142,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useTauri } from '../composables/useTauri'
 import { useAudioDuration } from '../composables/useAudioDuration'
 import ImportAudioSection from '@/components/ImportAudioSection.vue'
-import ImportImageSection from '@/components/ImportImageSection.vue'
+import ImportVideoSection from '@/components/ImportVideoSection.vue'
 import VideoEffect from '@/components/VideoEffect.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import VideoAspectRatioSection from '@/components/VideoAspectRatioSection.vue'
@@ -174,13 +151,13 @@ import '../assets/css/image-to-video.css'
 const { callCommand } = useTauri()
 const { loadFileDuration } = useAudioDuration()
 
-// Image files - store file paths
-const imageFiles = ref([])
+// Video files - store file paths
+const videoFiles = ref([])
 
 // Audio files - store file paths
 const audioFiles = ref([])
 
-// Configuration
+// Configuration (vẫn giữ giống trang ImageToVideoPage, nhưng không hiển thị UI thời gian / hiệu ứng ảnh)
 const imageDuration = ref(6)
 const durationOptions = [5, 6, 7, 8, 10, 12, 15, 20, 30]
 const videoQuality = ref('fullhd')
@@ -196,8 +173,6 @@ const imageEffectOptions = [
   { name: 'Fade out', value: 'fade-out' },
   { name: 'Pan', value: 'pan' },
 ]
-
-
 
 // Output
 const outputFolder = ref('')
@@ -217,7 +192,6 @@ const videoHistory = ref([])
 
 const selectOutputFolder = async () => {
   try {
-    // Sử dụng Tauri Dialog API - nhất quán với selectImageFiles
     const selected = await open({
       directory: true,
       multiple: false
@@ -233,9 +207,9 @@ const selectOutputFolder = async () => {
   }
 }
 
-const createVideoFromImages = async () => {
-  if (imageFiles.value.length === 0) {
-    statusMessage.value = 'Vui lòng chọn ít nhất một ảnh'
+const createVideoFromVideos = async () => {
+  if (videoFiles.value.length === 0) {
+    statusMessage.value = 'Vui lòng chọn ít nhất một video'
     statusType.value = 'error'
     return
   }
@@ -247,7 +221,7 @@ const createVideoFromImages = async () => {
   }
   
   if (imageDuration.value < 5) {
-    statusMessage.value = 'Khoảng cách giữa các ảnh phải tối thiểu 5 giây'
+    statusMessage.value = 'Khoảng cách giữa các phần phải tối thiểu 5 giây'
     statusType.value = 'error'
     return
   }
@@ -258,9 +232,8 @@ const createVideoFromImages = async () => {
       statusMessage.value = '⏳ Đang kiểm tra thời gian audio...'
       statusType.value = 'info'
       
-      // Tính tổng thời gian video từ ảnh (giây)
-      // Công thức: (số ảnh * thời gian mỗi ảnh) + số ảnh (cho transition)
-      const totalVideoTime = (imageFiles.value.length * imageDuration.value) + imageFiles.value.length
+      // Tính tổng thời gian video từ video input (tạm thời sử dụng công thức giống ảnh)
+      const totalVideoTime = (videoFiles.value.length * imageDuration.value) + videoFiles.value.length
       
       // Tính tổng thời gian audio
       let totalAudioTime = 0
@@ -271,9 +244,8 @@ const createVideoFromImages = async () => {
         }
       }
       
-      // Kiểm tra xem audio có đủ dài không
       if (totalAudioTime < totalVideoTime) {
-        statusMessage.value = `❌ Thời gian audio (${Math.round(totalAudioTime)}s) ngắn hơn thời gian video (${totalVideoTime}s). Vui lòng thêm audio hoặc giảm thời gian mỗi ảnh.`
+        statusMessage.value = `❌ Thời gian audio (${Math.round(totalAudioTime)}s) ngắn hơn thời gian video (${totalVideoTime}s). Vui lòng thêm audio hoặc giảm thời lượng.`
         statusType.value = 'error'
         return
       }
@@ -284,33 +256,46 @@ const createVideoFromImages = async () => {
       return
     }
   } else {
-    // Không có audio - tạo video không âm thanh
-    statusMessage.value = '📹 Tạo video không có âm thanh'
+    statusMessage.value = '📹 Ghép video không có âm thanh'
     statusType.value = 'info'
   }
   
   isCreating.value = true
   progress.value = 5
-  statusMessage.value = '⏳ Đang bắt đầu tạo video từ ảnh...'
+  statusMessage.value = '⏳ Đang bắt đầu ghép video...'
   statusType.value = 'info'
   videoFolderPath.value = null
   
   try {
     progress.value = 20
-    statusMessage.value = '⏳ Đang tạo video từ ảnh...'
+    statusMessage.value = '⏳ Đang ghép video...'
     
-    console.log('🎬 Creating video with audio files:', audioFiles.value)
+    // Tính CRF dựa trên video quality
+    const crfMap = {
+      'hd': '23',
+      'fullhd': '22',
+      '2K': '20',
+      '4K': '20'
+    }
+    const crf = crfMap[videoQuality.value] || '22'
     
-    const result = await callCommand('create_video_from_images', {
-      imageFiles: imageFiles.value,
-      imageDuration: imageDuration.value,
-      imageEffectType: imageEffectType.value,
-      videoQuality: videoQuality.value,
-      videoAspectRatio: videoAspectRatio.value,
-      videoEffectType: videoEffectType.value,
+    // Tạo output path với timestamp
+    const timestamp = Date.now()
+    const outputFileName = `final_video_${timestamp}.mp4`
+    // Sử dụng path.join để xử lý đúng trên mọi platform
+    const outputFolderPath = outputFolder.value.trim()
+    const separator = outputFolderPath.includes('\\') ? '\\' : '/'
+    const outputPath = outputFolderPath.endsWith(separator) 
+      ? `${outputFolderPath}${outputFileName}`
+      : `${outputFolderPath}${separator}${outputFileName}`
+    
+    const result = await callCommand('create_video_from_video', {
+      videoFiles: videoFiles.value,
       audioFiles: audioFiles.value,
-      outputFolder: outputFolder.value.trim(),
-      isAutoCaption: isAutoCaption.value
+      outputPath: outputPath,
+      crf: crf,
+      isHasAutoCaption: isAutoCaption.value,
+      videoEffectType: videoEffectType.value
     })
     
     progress.value = 100
@@ -319,30 +304,25 @@ const createVideoFromImages = async () => {
       throw new Error(result)
     }
     
-    // Parse result để lấy tên file và folder path
-    // Format: "Video đã được tạo thành công! /path/to/filename.mp4"
     const videoFileNameMatch = result.match(/Video đã được tạo thành công!\s*(.+)/i)
     if (videoFileNameMatch) {
       const videoFilePath = videoFileNameMatch[1].trim()
       const videoFileName = videoFilePath.split('/').pop() || videoFilePath.split('\\').pop() || videoFilePath
       statusMessage.value = `✅ Video đã được tạo thành công! ${videoFileName}`
       
-      // Lưu folder path từ outputFolder để có thể mở folder
       if (outputFolder.value) {
         videoFolderPath.value = outputFolder.value
       }
       
-      // Add to history
       videoHistory.value.unshift({
         fileName: videoFileName,
         outputPath: videoFilePath,
-        imageCount: imageFiles.value.length,
+        videoCount: videoFiles.value.length,
         quality: videoQuality.value,
         duration: imageDuration.value,
         effect: imageEffectType.value,
         createdAt: new Date().toISOString()
       })
-      // Keep only last 20 items
       if (videoHistory.value.length > 20) {
         videoHistory.value = videoHistory.value.slice(0, 20)
       }
@@ -353,7 +333,7 @@ const createVideoFromImages = async () => {
     statusType.value = 'success'
   } catch (error) {
     if (error.toString().includes('đã bị hủy') || error.toString().includes('cancelled')) {
-      statusMessage.value = '⚠️ Quá trình tạo video đã bị hủy'
+      statusMessage.value = '⚠️ Quá trình ghép video đã bị hủy'
       statusType.value = 'info'
     } else {
       statusMessage.value = '❌ Lỗi: ' + error
@@ -372,7 +352,7 @@ const stopVideoCreation = async () => {
       processId: currentProcessId.value
     })
     currentProcessId.value = null
-    statusMessage.value = '⚠️Đã dừng quá trình tạo video và xóa toàn bộ file tạm'
+    statusMessage.value = '⚠️Đã dừng quá trình ghép video và xóa toàn bộ file tạm'
     statusType.value = 'info'
     isCreating.value = false
   } catch (error) {
@@ -392,16 +372,16 @@ const openVideoFolderFromPath = async () => {
   }
 }
 
-// Image handlers
-const handleImageFilesUpdate = (files) => {
-  imageFiles.value = files
+// Video handlers
+const handleVideoFilesUpdate = (files) => {
+  videoFiles.value = files
 }
 
-const handleImagesSelected = (files) => {
+const handleVideosSelected = (files) => {
   statusType.value = 'success'
 }
 
-const handleImagesCleared = () => {
+const handleVideosCleared = () => {
   // Clear any related state if needed
 }
 
@@ -426,7 +406,6 @@ const closeAudioRequiredModal = () => {
 const handleAudioFilesUpdate = (files) => {
   audioFiles.value = files
   
-  // Tự động uncheck auto caption khi không còn audio files
   if (files.length === 0 && isAutoCaption.value) {
     isAutoCaption.value = false
   }
@@ -437,11 +416,10 @@ const handleAudioSelected = (files) => {
 }
 
 const handleAudioCleared = () => {
-  // Tự động uncheck auto caption khi xóa tất cả audio
   if (isAutoCaption.value) {
     isAutoCaption.value = false
   }
 }
-
 </script>
+
 
