@@ -82,10 +82,24 @@ async fn get_video_duration(video_path: &str) -> Result<f64, String> {
     Ok(duration)
 }
 
-/// Base scale filter: scale và pad để fit vào resolution (giữ nguyên tỉ lệ)
-fn build_base_scale(width: i32, height: i32) -> String {
-    format!("scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2", 
-        width, height, width, height)
+/// Base scale filter
+/// - Nếu `no_black_bars = false`: scale và pad để fit vào resolution (giữ nguyên tỉ lệ, có thể có viền đen)
+/// - Nếu `no_black_bars = true`: scale để COVER hết khung hình rồi crop về đúng resolution (không có viền đen)
+fn build_base_scale(width: i32, height: i32, no_black_bars: bool) -> String {
+    if no_black_bars {
+        // scale với force_original_aspect_ratio=increase để hình luôn phủ kín khung
+        // sau đó crop về đúng width x height -> không có viền đen nhưng có thể bị crop một phần hình
+        format!(
+            "scale={}:{}:force_original_aspect_ratio=increase,crop={}:{}",
+            width, height, width, height
+        )
+    } else {
+        // Giữ nguyên logic cũ: scale để fit vào khung rồi pad để đủ resolution (có thể có viền đen)
+        format!(
+            "scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2",
+            width, height, width, height
+        )
+    }
 }
 
 /**
@@ -99,8 +113,9 @@ async fn prepare_video_before_merge(
     target_height: i32,
     crf: &str,
     remove_audio: bool,
+    no_black_bars: bool,
 ) -> Result<(), String> {
-    let scale_filter = build_base_scale(target_width, target_height);
+    let scale_filter = build_base_scale(target_width, target_height, no_black_bars);
     
     let mut cmd = run_ffmpeg()?;
     cmd.arg("-i")
@@ -155,6 +170,7 @@ async fn concat_videos_direct(
     height: i32,
     preset: &str,
     crf: &str,
+    no_black_bars: bool,
 ) -> Result<(), String> {
     if video_files.is_empty() {
         return Err("Cần ít nhất một video".to_string());
@@ -162,7 +178,7 @@ async fn concat_videos_direct(
     
     if video_files.len() == 1 {
         // Chỉ có 1 video, scale và copy trực tiếp
-        let scale_filter = build_base_scale(width, height);
+        let scale_filter = build_base_scale(width, height, no_black_bars);
         let mut cmd = run_ffmpeg()?;
         cmd.arg("-i")
             .arg(&video_files[0])
@@ -204,7 +220,7 @@ async fn concat_videos_direct(
     }
     
     // Nhiều video: dùng filter_complex để scale và concat
-    let scale_filter = build_base_scale(width, height);
+    let scale_filter = build_base_scale(width, height, no_black_bars);
     
     // Build filter_complex: scale từng video rồi concat
     // Format: [0:v]scale=...:pad=...[v0]; [1:v]scale=...:pad=...[v1]; [v0][v1]concat=n=2:v=1:a=0[vout]
@@ -316,6 +332,8 @@ pub async fn merge_videos(
         "16:9" => (base_width, base_height),  // Giữ nguyên cho video ngang (16:9)
         _ => (base_width, base_height),       // Default 16:9
     };
+    // Với 9:16: ép full khung, không có viền đen (scale cover + crop)
+    let no_black_bars = video_aspect_ratio == "9:16";
     
     // Tối ưu preset và CRF dựa trên chất lượng video
     let (preset, crf) = match video_quality.as_str() {
@@ -342,6 +360,7 @@ pub async fn merge_videos(
         height,
         preset,
         crf,
+        no_black_bars,
     ).await?;
     
     let final_video_path = final_video_path_str;
@@ -786,6 +805,7 @@ async fn concat_videos_with_transitions(
     target_width: i32,
     target_height: i32,
     remove_original_audio: bool,
+    no_black_bars: bool,
 ) -> Result<(), String> {
     if video_files.is_empty() {
         return Err("Cần ít nhất một video".to_string());
@@ -813,6 +833,7 @@ async fn concat_videos_with_transitions(
             target_height,
             crf,
             remove_original_audio,
+            no_black_bars,
         ).await.map_err(|e| format!("Lỗi khi chuẩn bị video {}: {}", idx + 1, e))?;
         
         prepared_videos.push(prepared_path_str);
@@ -951,6 +972,8 @@ pub async fn create_video_from_video(
         "16:9" => (base_width, base_height),  // Giữ nguyên cho video ngang (16:9)
         _ => (base_width, base_height),       // Default 16:9
     };
+    // Với 9:16: ép full khung, không có viền đen (scale cover + crop)
+    let no_black_bars = video_aspect_ratio == "9:16";
     
     // Transition duration mặc định (1 giây)
     let transition_duration = 1.0;
@@ -971,6 +994,7 @@ pub async fn create_video_from_video(
         target_width,
         target_height,
         remove_original_audio,
+        no_black_bars,
     ).await?;
     
     // Bước 2: Xử lý audio nếu có
