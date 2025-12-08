@@ -237,7 +237,7 @@ const createVideoFromVideos = async () => {
       statusType.value = 'info'
       
       // Tính tổng thời gian video từ video input (tạm thời sử dụng công thức giống ảnh)
-      const totalVideoTime = (videoFiles.value.length * imageDuration.value) + videoFiles.value.length
+      const totalVideoTime = (videoFiles.value.length * imageDuration.value)
       
       // Tính tổng thời gian audio
       let totalAudioTime = 0

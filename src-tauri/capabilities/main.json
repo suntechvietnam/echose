@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "notification:allow-is-permission-granted",
     {
       "identifier": "fs:allow-read-text-file",
@@ -19,6 +20,14 @@
     },
     {
       "identifier": "fs:allow-write-text-file",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
       "allow": [
         {
           "path": "**"

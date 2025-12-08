@@ -23,6 +23,17 @@
           <a 
             href="#" 
             class="menu-item" 
+            :class="{ active: currentPage === 'extract-image-from-video' }"
+            @click.prevent="handleClick('extract-image-from-video')"
+          >
+            <span class="menu-icon">📸</span>
+            <span class="menu-text">Tách ảnh từ video</span>
+          </a>
+        </li>
+        <li>
+          <a 
+            href="#" 
+            class="menu-item" 
             :class="{ active: currentPage === 'video-to-video' }"
             @click.prevent="handleClick('video-to-video')"
           >
