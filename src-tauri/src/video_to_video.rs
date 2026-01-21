@@ -199,9 +199,10 @@ async fn prepare_video_before_merge(
 
     if best_encoder == "hevc_videotoolbox" {
         // Bitrate cho bước đệm cần RẤT CAO để đảm bảo 100% không mất chi tiết (Visual Lossless)
+        // BUMP: Tăng bitrate đệm lên mức "Insane" để đảm bảo source vào là đẹp nhất
         let bitrate = match target_height {
-            h if h <= 1080 => "12000k", // Đệm 12M HEVC (Dư giả cho 1080p)
-            _ => "50000k",             // Đệm 50M HEVC (Max quality cho 4K)
+            h if h <= 1080 => "20000k", // Đệm 20M HEVC (Cực cao cho 1080p)
+            _ => "80000k",             // Đệm 80M HEVC (Gần như lossless cho 4K)
         };
         cmd.arg("-b:v").arg(bitrate)
            .arg("-tag:v").arg("hvc1") 
@@ -553,14 +554,14 @@ async fn concat_videos_with_transitions(
     // if remove_original_audio { cmd.arg("-an"); } // Đã xử lý bằng map ở trên rồi
     
     if encoder == "hevc_videotoolbox" {
-        // Cấu hình Bitrate "Ultra Sharp" cho HEVC (100% chất lượng CPU)
-        // 1080p HEVC @ 8M (Chất lượng Mastering)
-        // 4K HEVC @ 35M (Chất lượng điện ảnh)
+        // Cấu hình Bitrate "Max Sharpness" cho HEVC (Thách thức CPU)
+        // 1080p HEVC @ 12M (Cao hơn cả bluray rip)
+        // 4K HEVC @ 50M (Chất lượng gốc máy quay)
         let bitrate = match target_height {
-            h if h <= 720 => "4000k",   // HD cực nét
-            h if h <= 1080 => "8000k",  // FHD (8Mbps HEVC là rất cao)
-            h if h <= 1440 => "15000k", // 2K
-            _ => "35000k",              // 4K (35Mbps HEVC nét căng đét)
+            h if h <= 720 => "6000k",   // HD siêu nét
+            h if h <= 1080 => "12000k", // FHD 12Mbps (Không thể vỡ hạt)
+            h if h <= 1440 => "25000k", // 2K
+            _ => "50000k",              // 4K 50Mbps
         };
         
         cmd.arg("-b:v").arg(bitrate)
