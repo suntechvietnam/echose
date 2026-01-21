@@ -1,0 +1,64 @@
+import { ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc } from '@tauri-apps/api/core'
+
+export function useTTS() {
+    const isGenerating = ref(false)
+    const lastGeneratedPath = ref(null)
+    const lastAudioUrl = ref(null)
+
+    const generateAudio = async (text, voiceConfig, options = {}) => {
+        const {
+            pitch = 0,
+            rate = 0,
+            volume = 0,
+            bass = 0,
+            treble = 0,
+            outputFolder = null,
+            provider = 'edge',
+            apiKey = ''
+        } = options
+
+        if (!text || !voiceConfig) {
+            throw new Error('Thiếu thông tin (văn bản hoặc giọng nói)')
+        }
+
+        isGenerating.value = true
+        try {
+            const pitchStr = pitch >= 0 ? `+${pitch}Hz` : `${pitch}Hz`
+            const rateStr = rate >= 0 ? `+${rate}%` : `${rate}%`
+            const volumeStr = volume >= 0 ? `+${volume}%` : `${volume}%`
+
+            const filePath = await invoke('generate_tts', {
+                provider,
+                apiKey,
+                text,
+                voice: voiceConfig.voice,
+                pitch: pitchStr,
+                rate: rateStr,
+                volume: volumeStr,
+                bass: parseInt(bass),
+                treble: parseInt(treble),
+                outputFolder
+            })
+
+            lastGeneratedPath.value = filePath
+            lastAudioUrl.value = convertFileSrc(filePath)
+            console.log('✅ Generated TTS file:', filePath)
+            console.log('🔗 Asset URL:', lastAudioUrl.value)
+            return { filePath, audioUrl: lastAudioUrl.value }
+        } catch (err) {
+            console.error('useTTS Error:', err)
+            throw err
+        } finally {
+            isGenerating.value = false
+        }
+    }
+
+    return {
+        isGenerating,
+        lastGeneratedPath,
+        lastAudioUrl,
+        generateAudio
+    }
+}

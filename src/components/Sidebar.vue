@@ -52,6 +52,17 @@
             <span class="menu-text">Audio / Video to text</span>
           </a>
         </li>
+        <li>
+          <a 
+            href="#" 
+            class="menu-item" 
+            :class="{ active: currentPage === 'voice-library' }"
+            @click.prevent="handleClick('voice-library')"
+          >
+            <span class="menu-icon">🎙️</span>
+            <span class="menu-text">Thư viện giọng nói</span>
+          </a>
+        </li>
       </ul>
     </nav>
 

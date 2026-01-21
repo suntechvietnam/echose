@@ -9,6 +9,7 @@ mod image_to_video;
 mod process;
 mod utils;
 mod video_to_video;
+mod tts;
 
 use process::ProcessStore;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub fn main() {
         .invoke_handler(tauri::generate_handler![
             // Mở thư mục bằng file explorer mặc định
             filesystem::open_folder,
+            filesystem::get_home_dir,
             // Image to video
             image_to_video::create_video_from_images,
             image_to_video::stop_image_video_creation,
@@ -46,7 +48,9 @@ pub fn main() {
             audio_to_text_ass::delete_temp_ass_file,
             // Audio to text (whisper-rs) - TXT format
             audio_to_text_txt::convert_audio_to_txt,
-            audio_to_text_txt::segments_to_txt_string
+            audio_to_text_txt::segments_to_txt_string,
+            // AI Voice (TTS)
+            tts::generate_tts
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -136,5 +137,43 @@ pub fn find_ffmpeg_or_error() -> Result<String, String> {
         {
             "Lỗi: Không tìm thấy ffmpeg. Vui lòng cài đặt ffmpeg.".to_string()
         }
+    })
+}
+
+/// Tự động phát hiện Hardware Encoder tốt nhất dựa trên OS và phần cứng
+/// Trả về "libx264" làm mặc định nếu không tìm thấy HW encoder
+pub fn get_best_encoder() -> &'static str {
+    static ENCODER: OnceLock<String> = OnceLock::new();
+    
+    ENCODER.get_or_init(|| {
+        let ffmpeg_path = match find_ffmpeg() {
+            Some(path) => path,
+            None => return "libx264".to_string(),
+        };
+
+        // Danh sách encoder ưu tiên theo OS
+        let candidates = if cfg!(target_os = "macos") {
+            vec!["h264_videotoolbox"]
+        } else if cfg!(target_os = "windows") {
+            vec!["h264_nvenc", "h264_qsv", "h264_amf"]
+        } else {
+            vec![]
+        };
+
+        if candidates.is_empty() {
+            return "libx264".to_string();
+        }
+
+        // Kiểm tra xem ffmpeg có hỗ trợ encoder nào trong danh sách không
+        if let Ok(output) = std::process::Command::new(&ffmpeg_path).arg("-encoders").output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            for encoder in candidates {
+                if output_str.contains(encoder) {
+                    return encoder.to_string();
+                }
+            }
+        }
+
+        "libx264".to_string()
     })
 }

@@ -1,5 +1,5 @@
 use crate::process::ProcessStore;
-use crate::utils::find_ffmpeg_by_os::{find_ffmpeg_or_error, run_ffmpeg};
+use crate::utils::find_ffmpeg_by_os::{find_ffmpeg_or_error, run_ffmpeg, get_best_encoder};
 use crate::utils::merge_audio_to_video::{merge_audio_without_caption, merge_audio_with_caption};
 use std::path::PathBuf;
 use std::fs;
@@ -25,14 +25,14 @@ struct ImageEffectParams {
     video_quality: String,
 }
 
-/// Tính toán scale factor dựa trên video quality
+/// Tính toán scale factor dựa trên video quality ĐỂ ZOOM MƯỢT mà không quá nặng RAM
 fn get_scale_factor(quality: &str) -> i32 {
     match quality {
-        "hd" => 4000,      // 720p
-        "fullhd" => 4000,  // 1080p
-        "2K" => 8000,      // 2K
-        "4K" => 8000,      // 4K
-        _ => 4000,         // Default
+        "hd" => 1800,      // 720p (1280x720) -> 1800px enough for zoom
+        "fullhd" => 2500,  // 1080p (1920x1080) -> 2500px enough
+        "2K" => 3500,      // 2K
+        "4K" => 4500,      // 4K
+        _ => 2500,         // Default
     }
 }
 
@@ -184,14 +184,28 @@ async fn create_single_segment(
         .arg("-r")
         .arg("25")  // Output framerate
         .arg("-vsync")
-        .arg("cfr")  // Constant framerate để đảm bảo video không bị đứng
-        .arg("-c:v")
-        .arg("libx264")
-        .arg("-preset")
-        .arg(preset)  // Tối ưu preset (medium cho 4K)
-        .arg("-crf")
-        .arg(crf)  // Tối ưu CRF (20 cho 4K)
-        .arg("-pix_fmt")
+        .arg("cfr"); // Constant framerate để đảm bảo video không bị đứng
+    
+    let encoder = get_best_encoder();
+    cmd.arg("-c:v").arg(encoder);
+    
+    if encoder == "libx264" {
+        cmd.arg("-preset").arg(preset).arg("-crf").arg(crf);
+    } else if encoder == "h264_videotoolbox" {
+        // Cấu hình bitrate dựa trên resolution
+        let bitrate = match _height {
+            h if h <= 720 => "8M",
+            h if h <= 1080 => "15M",
+            h if h <= 1440 => "30M",
+            _ => "50M",
+        };
+        cmd.arg("-b:v").arg(bitrate)
+           .arg("-realtime").arg("0");
+    } else if encoder.contains("nvenc") {
+        cmd.arg("-cq").arg(crf).arg("-preset").arg("p4");
+    }
+    
+    cmd.arg("-pix_fmt")
         .arg("yuv420p")
         .arg("-color_range")
         .arg("1")  // TV/limited range (16-235) để tránh warning deprecated pixel format
@@ -287,12 +301,12 @@ pub async fn create_video_from_images(
     
     // Tạo video từng ảnh với hiệu ứng - PARALLEL PROCESSING
     // Giới hạn số lượng concurrent tasks để tránh quá tải hệ thống
+    // Tối ưu số lượng concurrent tasks dựa trên CPU và chất lượng
+    let cpus = num_cpus::get();
     let max_concurrent = match video_quality.as_str() {
-        "hd" => 4,        // HD: có thể nhiều concurrent hơn
-        "fullhd" => 3,     // Full HD: vừa phải
-        "2K" => 2,         // 2K: ít hơn một chút
-        "4K" => 2,         // 4K: ít nhất để tránh quá tải
-        _ => 4,            // Default Full HD
+        "4K" | "2K" => (cpus / 4).max(1),
+        "fullhd" => (cpus / 2).max(2),
+        _ => (cpus - 1).max(2),
     };
 
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
@@ -577,168 +591,11 @@ async fn concat_without_effects_fast(
     Ok(())
 }
 
-/**
- * Ghép 2 video với transition
- */
-async fn merge_two_videos_with_transition(
-    video1_path: &str,
-    video2_path: &str,
-    output_path: &str,
-    transition_type: &str,
-    transition_duration: f64,
-    video1_duration: f64,
-    video2_duration: f64,
-) -> Result<(), String> {
-    // Build filter_complex cho 2 video với transition
-    // Offset = duration của video1 - transition_duration
-    let offset = video1_duration - transition_duration;
-    
-    let filter_complex = format!(
-        "[0:v][1:v]xfade=transition={}:duration={}:offset={}[video_out]",
-        transition_type, transition_duration, offset
-    );
-    
-    // Tính tổng duration: video1 + video2 - transition (vì có overlap)
-    let total_duration = video1_duration + video2_duration - transition_duration;
-    
-    // Build ffmpeg command
-    let mut cmd = run_ffmpeg()?;
-    cmd.arg("-i")
-        .arg(video1_path)
-        .arg("-i")
-        .arg(video2_path)
-        .arg("-filter_complex")
-        .arg(&filter_complex)
-        .arg("-map")
-        .arg("[video_out]")
-        .arg("-t")
-        .arg(format!("{:.2}", total_duration))
-        .arg("-c:v")
-        .arg("libx264")
-        .arg("-preset")
-        .arg("medium")
-        .arg("-crf")
-        .arg("20")
-        .arg("-pix_fmt")
-        .arg("yuv420p")
-        .arg("-g")
-        .arg("50")
-        .arg("-bf")
-        .arg("2")
-        .arg("-refs")
-        .arg("4")
-        .arg("-y")
-        .arg(output_path);
-    
-    // Chạy và đợi process hoàn thành
-    let output = cmd.output().await
-        .map_err(|e| format!("Lỗi khi ghép 2 video: {}", e))?;
-    
-    if !output.status.success() {
-        let error_msg = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Lỗi khi ghép 2 video với transition: {}", error_msg));
-    }
-    
-    Ok(())
-}
 
-/**
- * Concat video segments với transitions sử dụng Pipeline approach
- */
-async fn concat_with_pipeline_approach(
-    segment_files: Vec<String>,
-    video_effect_type: &str,
-    segment_duration: i32,
-    transition_duration: f64,
-    output_path: &str,
-) -> Result<(), String> {
-    if segment_files.is_empty() {
-        return Err("Cần ít nhất một video segment".to_string());
-    }
-    
-    if segment_files.len() == 1 {
-        // Chỉ có 1 segment, copy trực tiếp
-        fs::copy(&segment_files[0], output_path)
-            .map_err(|e| format!("Lỗi khi copy video: {}", e))?;
-        return Ok(());
-    }
-    
-    // Tạo thư mục tạm để lưu các file trung gian
-    let output_path_buf = PathBuf::from(output_path);
-    let work_dir = output_path_buf.parent()
-        .ok_or_else(|| "Không thể xác định thư mục output".to_string())?;
-    
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    
-    let pipeline_work_dir = work_dir.join(format!("pipeline_temp_{}", timestamp));
-    fs::create_dir_all(&pipeline_work_dir)
-        .map_err(|e| format!("Lỗi khi tạo pipeline work directory: {}", e))?;
-    
-    // Bước 1: Ghép video đầu tiên với video thứ 2
-    let current_output = pipeline_work_dir.join(format!("pipeline_000.mp4"));
-    let mut current_output_str = current_output.to_string_lossy().to_string();
-    
-    // Tính duration hiện tại của output (bắt đầu với 2 video)
-    let mut current_duration = segment_duration as f64 * 2.0 - transition_duration;
-    
-    merge_two_videos_with_transition(
-        &segment_files[0],
-        &segment_files[1],
-        &current_output_str,
-        video_effect_type,
-        transition_duration,
-        segment_duration as f64,
-        segment_duration as f64,
-    ).await.map_err(|e| format!("Lỗi khi ghép video 1-2: {}", e))?;
-    
-    // Bước 2: Ghép output hiện tại với các video tiếp theo
-    for (idx, next_video) in segment_files.iter().enumerate().skip(2) {
-        let next_output = pipeline_work_dir.join(format!("pipeline_{:03}.mp4", idx));
-        let next_output_str = next_output.to_string_lossy().to_string();
-        
-        merge_two_videos_with_transition(
-            &current_output_str,
-            next_video,
-            &next_output_str,
-            video_effect_type,
-            transition_duration,
-            current_duration,
-            segment_duration as f64,
-        ).await.map_err(|e| format!("Lỗi khi ghép video {}: {}", idx + 1, e))?;
-        
-        // Cập nhật duration cho output mới
-        current_duration = current_duration + segment_duration as f64 - transition_duration;
-        
-        // Xóa file trung gian trước đó
-        let _ = fs::remove_file(&current_output_str);
-        
-        // Cập nhật current_output cho lần lặp tiếp theo
-        current_output_str = next_output_str;
-    }
-    
-    // Bước 3: Copy file cuối cùng vào output_path
-    fs::copy(&current_output_str, output_path)
-        .map_err(|e| format!("Lỗi khi copy file cuối cùng: {}", e))?;
-    
-    // Bước 4: Xóa file trung gian cuối cùng
-    let _ = fs::remove_file(&current_output_str);
-    
-    // Bước 5: Xóa thư mục pipeline tạm (bao gồm tất cả file trung gian)
-    let _ = fs::remove_dir_all(&pipeline_work_dir);
-
-    Ok(())
-}
-
-/**
- * Helper function để concat video segments với transitions
- */
 async fn concat_video_segments_with_transitions_helper(
     segment_files: Vec<String>,
     video_effect_type: &str,
-    _video_quality: &str,
+    video_quality: &str,
     _video_aspect_ratio: &str,
     segment_duration: i32,
     transition_duration: f64,
@@ -759,14 +616,65 @@ async fn concat_video_segments_with_transitions_helper(
         return concat_without_effects_fast(segment_files, output_path).await;
     }
     
-    // Có hiệu ứng: dùng Pipeline approach
-    return concat_with_pipeline_approach(
-        segment_files,
-        video_effect_type,
-        segment_duration,
-        transition_duration,
-        output_path,
-    ).await;
+    // Có hiệu ứng: sử dụng SINGLE-PASS TRANSITION (Tối ưu nhất cho ảnh)
+    let mut filter_parts = Vec::new();
+    let mut current_offset = 0.0;
+    let mut last_output_label = "[v0]".to_string();
+    
+    // Init video đầu tiên
+    filter_parts.push(format!("[0:v]null[v0]"));
+
+    for (i, _) in segment_files.iter().enumerate().skip(1) {
+        current_offset += segment_duration as f64 - transition_duration;
+        let joined_label = format!("[vjoin{}]", i);
+        
+        filter_parts.push(format!(
+            "{}[{}:v]xfade=transition={}:duration={}:offset={:.2}{}",
+            last_output_label, i, video_effect_type, transition_duration, current_offset, joined_label
+        ));
+        
+        last_output_label = joined_label;
+    }
+
+    let filter_complex = filter_parts.join("; ");
+    let final_label = last_output_label;
+
+    let mut cmd = run_ffmpeg()?;
+    let encoder = get_best_encoder();
+    
+    for segment in &segment_files {
+        cmd.arg("-i").arg(segment);
+    }
+    
+    cmd.arg("-filter_complex").arg(&filter_complex)
+       .arg("-map").arg(final_label)
+       .arg("-r").arg("30") // Đồng bộ framerate ngõ ra
+       .arg("-c:v").arg(encoder);
+
+    if encoder == "libx264" {
+        cmd.arg("-crf").arg("20").arg("-preset").arg("medium");
+    } else if encoder == "h264_videotoolbox" {
+        // Lấy bitrate từ resolution logic
+        let bitrate = match video_quality {
+            "hd" => "8M",
+            "fullhd" => "15M",
+            "2K" => "30M",
+            "4K" => "50M",
+            _ => "15M",
+        };
+        cmd.arg("-b:v").arg(bitrate).arg("-profile:v").arg("high");
+    } else if encoder.contains("nvenc") {
+        cmd.arg("-cq").arg("20");
+    }
+
+    cmd.arg("-pix_fmt").arg("yuv420p")
+       .arg("-y").arg(output_path);
+
+    let output = cmd.output().await.map_err(|e| format!("FFmpeg single-pass image error: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("FFmpeg image transition failing: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(())
 }
 
 // ============================================================================

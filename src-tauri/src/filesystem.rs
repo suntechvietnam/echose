@@ -36,3 +36,10 @@ pub async fn open_folder(path: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+pub fn get_home_dir() -> Result<String, String> {
+    dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "Không tìm thấy thư mục Home".to_string())
+}
+

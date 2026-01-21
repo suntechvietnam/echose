@@ -20,14 +20,6 @@
             @status-message="handleStatusMessage"
             @update:removeOriginalAudio="handleRemoveOriginalAudioUpdate"
           />
-
-          <!-- Audio Selection Section -->
-          <ImportAudioSection 
-            :modelValue="audioFiles"
-            @update:audioFiles="handleAudioFilesUpdate"
-            @audio-selected="handleAudioSelected"
-            @audio-cleared="handleAudioCleared"
-          />
         </div>
 
         <!-- Cột phải: Options và controls -->
@@ -36,19 +28,40 @@
 
           <div class="file-group">
             <div class="form-group">
-              <label class="form-label">📺 Chất lượng video</label>
-              <select v-model="videoQuality" class="form-select">
-                <option value="hd">720 (HD)</option>
-                <option value="fullhd">1080 (Full HD)</option>
-                <option value="2K">2K (2048x1080)</option>
-                <option value="4K">4K (3840x2160)</option>
-              </select>
+              <label class="form-label">⚙️ Chế độ ghép</label>
+              <div class="mode-selection">
+                <div class="radio-option">
+                  <input type="radio" id="mode-fast" value="fast" v-model="mergeMode">
+                  <label for="mode-fast" title="Giữ nguyên chất lượng gốc, cực nhanh. Yêu cầu video đầu vào phải giống hệt nhau về độ phân giải và FPS.">
+                    🚀 Siêu tốc (Cùng loại)
+                  </label>
+                </div>
+                <div class="radio-option">
+                  <input type="radio" id="mode-convert" value="convert" v-model="mergeMode">
+                  <label for="mode-convert" title="Tự động đồng bộ độ phân giải. Hỗ trợ mọi loại video.">
+                    🔄 Chuyển đổi (Đa năng)
+                  </label>
+                </div>
+              </div>
             </div>
 
-            <VideoEffect 
-              :selectedEffect="videoEffectType"
-              @update:selectedEffect="videoEffectType = $event"
-            />
+            <!-- Chỉ hiện chọn chất lượng và hiệu ứng khi ở Mode Convert -->
+            <div v-if="mergeMode === 'convert'">
+                <div class="form-group">
+                  <label class="form-label">📺 Chất lượng video ra</label>
+                  <select v-model="videoQuality" class="form-select">
+                    <option value="hd">720 (HD)</option>
+                    <option value="fullhd">1080 (Full HD)</option>
+                    <option value="2K">2K (2048x1080)</option>
+                    <option value="4K">4K (3840x2160)</option>
+                  </select>
+                </div>
+    
+                <VideoEffect 
+                  :selectedEffect="videoEffectType"
+                  @update:selectedEffect="videoEffectType = $event"
+                />
+            </div>
           </div>
 
           <div class="file-group">
@@ -65,21 +78,6 @@
                 <button class="btn-select-folder" @click="selectOutputFolder">
                   Chọn
                 </button>
-              </div>
-            </div>
-            
-            <div class="form-group auto-caption-group">
-              <div class="checkbox-container">
-                <input 
-                  type="checkbox" 
-                  id="auto-caption-checkbox-v2v"
-                  v-model="isAutoCaption"
-                  @click="handleAutoCaptionClick"
-                  class="checkbox-input"
-                />
-                <label for="auto-caption-checkbox-v2v" class="checkbox-label">
-                  🎬 Auto caption
-                </label>
               </div>
             </div>
           </div>
@@ -123,17 +121,6 @@
         </div>
       </div>
     </div>
-    
-    <!-- Audio Required Modal -->
-    <ConfirmModal 
-      v-if="isShowAudioRequiredModal"
-      :title="'Thông báo'"
-      :message="'Bạn cần chọn file audio để dùng tính năng auto caption'"
-      :type="'info'"
-      :confirmText="'OK'"
-      :cancelText="''"
-      @confirm="closeAudioRequiredModal"
-    />
   </div>
 </template>
 
@@ -141,50 +128,32 @@
 import { ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useTauri } from '../composables/useTauri'
-import { useAudioDuration } from '../composables/useAudioDuration'
-import ImportAudioSection from '@/components/ImportAudioSection.vue'
 import ImportVideoSection from '@/components/ImportVideoSection.vue'
 import VideoEffect from '@/components/VideoEffect.vue'
-import ConfirmModal from '@/components/ConfirmModal.vue'
 import VideoAspectRatioSection from '@/components/VideoAspectRatioSection.vue'
 import '../assets/css/image-to-video.css'
 
 const { callCommand } = useTauri()
-const { loadFileDuration } = useAudioDuration()
 
 // Video files - store file paths
 const videoFiles = ref([])
-
-// Audio files - store file paths
-const audioFiles = ref([])
 
 // Remove original audio from videos
 const removeOriginalAudio = ref(false)
 
 // Configuration (vẫn giữ giống trang ImageToVideoPage, nhưng không hiển thị UI thời gian / hiệu ứng ảnh)
 const imageDuration = ref(6)
-const durationOptions = [5, 6, 7, 8, 10, 12, 15, 20, 30]
 const videoQuality = ref('fullhd')
 const videoAspectRatio = ref('16:9') // Default: 16:9 (Video dài)
 const videoEffectType = ref('diagtl')
 const imageEffectType = ref('zoom-in')
-
-const imageEffectOptions = [
-  { name: 'Không có', value: 'none' },
-  { name: 'Zoom in', value: 'zoom-in' },
-  { name: 'Zoom out', value: 'zoom-out' },
-  { name: 'Fade in', value: 'fade-in' },
-  { name: 'Fade out', value: 'fade-out' },
-  { name: 'Pan', value: 'pan' },
-]
+const mergeMode = ref('convert') // Default: Convert (An toàn)
 
 // Output
 const outputFolder = ref('')
-const isAutoCaption = ref(false)
 const isCreating = ref(false)
 const statusMessage = ref('')
 const statusType = ref('info')
-const isShowAudioRequiredModal = ref(false)
 const progress = ref(0)
 const currentProcessId = ref(null)
 const videoFolderPath = ref(null)
@@ -224,46 +193,6 @@ const createVideoFromVideos = async () => {
     return
   }
   
-  if (imageDuration.value < 5) {
-    statusMessage.value = 'Khoảng cách giữa các phần phải tối thiểu 5 giây'
-    statusType.value = 'error'
-    return
-  }
-  
-  // Validate audio nếu có - Tùy chọn không bắt buộc
-  if (audioFiles.value.length > 0) {
-    try {
-      statusMessage.value = '⏳ Đang kiểm tra thời gian audio...'
-      statusType.value = 'info'
-      
-      // Tính tổng thời gian video từ video input (tạm thời sử dụng công thức giống ảnh)
-      const totalVideoTime = (videoFiles.value.length * imageDuration.value)
-      
-      // Tính tổng thời gian audio
-      let totalAudioTime = 0
-      for (const audioFile of audioFiles.value) {
-        const audioDuration = await loadFileDuration(audioFile)
-        if (audioDuration) {
-          totalAudioTime += audioDuration
-        }
-      }
-      
-      if (totalAudioTime < totalVideoTime) {
-        statusMessage.value = `❌ Thời gian audio (${Math.round(totalAudioTime)}s) ngắn hơn thời gian video (${totalVideoTime}s). Vui lòng thêm audio hoặc giảm thời lượng.`
-        statusType.value = 'error'
-        return
-      }
-      
-    } catch (error) {
-      statusMessage.value = '❌ Lỗi khi kiểm tra audio: ' + error
-      statusType.value = 'error'
-      return
-    }
-  } else {
-    statusMessage.value = '📹 Ghép video không có âm thanh'
-    statusType.value = 'info'
-  }
-  
   isCreating.value = true
   progress.value = 5
   statusMessage.value = '⏳ Đang bắt đầu ghép video...'
@@ -295,14 +224,15 @@ const createVideoFromVideos = async () => {
     
     const result = await callCommand('create_video_from_video', {
       videoFiles: videoFiles.value,
-      audioFiles: audioFiles.value,
+      audioFiles: [],
       outputPath: outputPath,
       crf: crf,
-      isHasAutoCaption: isAutoCaption.value,
+      isHasAutoCaption: false,
       videoEffectType: videoEffectType.value,
       videoQuality: videoQuality.value,
       videoAspectRatio: videoAspectRatio.value,
-      removeOriginalAudio: removeOriginalAudio.value
+      removeOriginalAudio: removeOriginalAudio.value,
+      mergeMode: mergeMode.value
     })
     
     progress.value = 100
@@ -399,37 +329,6 @@ const handleStatusMessage = (message, type) => {
 
 const handleRemoveOriginalAudioUpdate = (value) => {
   removeOriginalAudio.value = value
-}
-
-const handleAutoCaptionClick = (event) => {
-  if (event.target.checked && audioFiles.value.length === 0) {
-    event.preventDefault()
-    isAutoCaption.value = false // Reset checkbox
-    isShowAudioRequiredModal.value = true
-  }
-}
-
-const closeAudioRequiredModal = () => {
-  isShowAudioRequiredModal.value = false
-}
-
-// Audio handlers
-const handleAudioFilesUpdate = (files) => {
-  audioFiles.value = files
-  
-  if (files.length === 0 && isAutoCaption.value) {
-    isAutoCaption.value = false
-  }
-}
-
-const handleAudioSelected = (files) => {
-  // Không cần thông báo khi chọn audio
-}
-
-const handleAudioCleared = () => {
-  if (isAutoCaption.value) {
-    isAutoCaption.value = false
-  }
 }
 </script>
 
