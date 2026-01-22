@@ -164,6 +164,8 @@ impl AssExportConfig {
         text_color: Option<&str>,
         border_color: Option<&str>,
         highlight_color: Option<&str>,
+        font_name: Option<&str>,
+        font_size: Option<i32>,
     ) -> Self {
         let mut config = Self::default();
         
@@ -177,6 +179,14 @@ impl AssExportConfig {
         
         if let Some(format) = video_format {
             config.video_format = VideoFormat::from_str(format);
+        }
+
+        if let Some(font) = font_name {
+            config.font_name = font.to_string();
+        }
+
+        if let Some(size) = font_size {
+            config.custom_font_size = Some(size as u32);
         }
         
         if let Some(text_col) = text_color {
@@ -377,6 +387,8 @@ pub fn audio_to_ass(
     text_color: Option<&str>,
     border_color: Option<&str>,
     highlight_color: Option<&str>,
+    font_name: Option<&str>,
+    font_size: Option<i32>,
 ) -> Result<String> {
     // Đường dẫn mặc định cho model (whisper.cpp format .bin)
     let model_name = model_path.unwrap_or("ggml-base.bin");
@@ -496,6 +508,8 @@ pub fn audio_to_ass(
         text_color,
         border_color,
         highlight_color,
+        font_name,
+        font_size,
     );
     
     // Xuất ASS với timestamps chính xác
@@ -784,6 +798,8 @@ pub async fn convert_audio_to_ass(
     text_color: Option<String>,
     border_color: Option<String>,
     highlight_color: Option<String>,
+    font_name: Option<String>,
+    font_size: Option<i32>,
 ) -> Result<String, String> {
     // Chạy trong blocking thread vì whisper processing nặng
     tokio::task::spawn_blocking(move || {
@@ -796,7 +812,9 @@ pub async fn convert_audio_to_ass(
             video_format.as_deref(),
             text_color.as_deref(),
             border_color.as_deref(),
-            highlight_color.as_deref()
+            highlight_color.as_deref(),
+            font_name.as_deref(),
+            font_size
         )
     })
     .await
@@ -815,6 +833,8 @@ pub async fn segments_to_ass_string(
     text_color: Option<String>,
     border_color: Option<String>,
     highlight_color: Option<String>,
+    font_name: Option<String>,
+    font_size: Option<i32>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         // Convert tuples to TranscriptSegment
@@ -831,6 +851,8 @@ pub async fn segments_to_ass_string(
             text_color.as_deref(),
             border_color.as_deref(),
             highlight_color.as_deref(),
+            font_name.as_deref(),
+            font_size,
         );
 
         // Tạo nội dung ASS

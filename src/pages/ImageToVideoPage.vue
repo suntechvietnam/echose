@@ -6,11 +6,9 @@
     <div class="page-body image-to-video-container">
       <!-- Layout 2 cột -->
       <div class="image-to-video-layout">
-        <!-- Cột trái: Chọn và hiển thị danh sách ảnh -->
+        <!-- Cột trái: Media & Phụ đề -->
         <div class="image-to-video-left-column">
-          <VideoAspectRatioSection
-            v-model="videoAspectRatio"
-          />
+          <VideoAspectRatioSection v-model="videoAspectRatio" />
 
           <ImportImageSection 
             :modelValue="imageFiles"
@@ -27,120 +25,190 @@
             @audio-selected="handleAudioSelected"
             @audio-cleared="handleAudioCleared"
           />
-        </div>
 
-        <!-- Cột phải: Options và controls -->
-        <div class="image-to-video-right-column">
-          <!-- Cấu hình video -->
-          <div class="file-group">
-            <div class="form-group">
-              <div class="form-group image-settings-group">
-                <div class="image-settings-item">
-                  <label class="form-label">⏱️ Thời gian mỗi ảnh</label>
-                  <select v-model="imageDuration" class="form-select">
-                    <option v-for="duration in durationOptions" :key="duration" :value="duration">
-                      {{ duration }} giây
-                    </option>
-                  </select>
+          <!-- Logo Section Card -->
+          <div class="file-group logo-settings-card">
+            <h3 class="card-subtitle-main">🏷️ Watermark / Logo</h3>
+            <div class="input-group">
+              <input 
+                type="text" 
+                v-model="logoPath"
+                class="form-input" 
+                placeholder="Chọn ảnh logo (PNG/JPG)..."
+                readonly
+              />
+              <button class="btn-select-folder" @click="selectLogoFile">Chọn</button>
+              <button v-if="logoPath" class="btn-clear-path" @click="logoPath = ''">✕</button>
+            </div>
+            
+            <div class="logo-custom-settings" :class="{ 'is-disabled': !logoPath }">
+              <div class="settings-divider"><span>Vị trí Logo (Manual)</span></div>
+              <div class="logo-pos-group">
+                <label class="form-label-small">Góc Neo:</label>
+                <select v-model="logoPosition" class="form-select-small" :disabled="!logoPath">
+                  <option value="top_left">Trên - Trái</option>
+                  <option value="top_right">Trên - Phải</option>
+                  <option value="bottom_left">Dưới - Trái</option>
+                  <option value="bottom_right">Dưới - Phải</option>
+                </select>
+              </div>
+              <div class="logo-margins-grid">
+                <div class="margin-input-item">
+                  <label>Top</label>
+                  <input type="number" v-model.number="logoMarginTop" :disabled="!logoPath || logoPosition.includes('bottom')" />
                 </div>
-
-                <div class="image-settings-item">
-                  <label class="form-label">✨ Hiệu ứng ảnh</label>
-                  <select v-model="imageEffectType" class="form-select">
-                    <option v-for="imageEffect in imageEffectOptions" :key="imageEffect.value" :value="imageEffect.value">
-                      {{ imageEffect.name }}
-                    </option>
-                  </select>
+                <div class="margin-input-item">
+                  <label>Bottom</label>
+                  <input type="number" v-model.number="logoMarginBottom" :disabled="!logoPath || logoPosition.includes('top')" />
+                </div>
+                <div class="margin-input-item">
+                  <label>Left</label>
+                  <input type="number" v-model.number="logoMarginLeft" :disabled="!logoPath || logoPosition.includes('right')" />
+                </div>
+                <div class="margin-input-item">
+                  <label>Right</label>
+                  <input type="number" v-model.number="logoMarginRight" :disabled="!logoPath || logoPosition.includes('left')" />
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="file-group">
-            <div class="form-group">
-              <label class="form-label">📺 Chất lượng video</label>
-              <select v-model="videoQuality" class="form-select">
-                <option value="hd">720 (HD)</option>
-                <option value="fullhd">1080 (Full HD)</option>
-                <option value="2K">2K (2048x1080)</option>
-                <option value="4K">4K (3840x2160)</option>
-              </select>
+          <!-- Subtitle Section Card -->
+          <div class="file-group subtitle-settings-card">
+            <h3 class="card-subtitle-main">📄 Phụ đề (Hardsub)</h3>
+            
+            <!-- Subtitle Mode Selection -->
+            <div class="subtitle-mode-selector">
+              <label class="mode-option" :class="{ active: subtitleMode === 'none' }">
+                <input type="radio" v-model="subtitleMode" value="none" />
+                <span>None</span>
+              </label>
+              <label class="mode-option" :class="{ active: subtitleMode === 'auto' }">
+                <input type="radio" v-model="subtitleMode" value="auto" @change="handleSubtitleModeChange" />
+                <span>Tự động (AI)</span>
+              </label>
+              <label class="mode-option" :class="{ active: subtitleMode === 'file' }">
+                <input type="radio" v-model="subtitleMode" value="file" @change="handleSubtitleModeChange" />
+                <span>Chọn file</span>
+              </label>
             </div>
 
-            <VideoEffect 
-              :selectedEffect="videoEffectType"
-              @update:selectedEffect="videoEffectType = $event"
-            />
-          </div>
+            <!-- File selection (only if mode is 'file') -->
+            <div v-if="subtitleMode === 'file'" class="input-group" style="margin-top: 15px;">
+              <input 
+                type="text" 
+                v-model="subtitlePath"
+                class="form-input" 
+                placeholder="Chọn file .ass hoặc .srt..."
+                readonly
+              />
+              <button class="btn-select-folder" @click="selectSubtitleFile">Chọn</button>
+              <button v-if="subtitlePath" class="btn-clear-path" @click="subtitlePath = ''">✕</button>
+            </div>
 
-          <div class="file-group">
-            <div class="form-group">
-              <label class="form-label">💾 Thư mục lưu video</label>
-              <div class="input-group">
-                <input 
-                  type="text" 
-                  v-model="outputFolder"
-                  class="form-input" 
-                  placeholder="Chọn thư mục để lưu video..."
-                  readonly
-                />
-                <button class="btn-select-folder" @click="selectOutputFolder">
-                  Chọn
-                </button>
+            <!-- Custom settings (only if not 'none') -->
+            <div v-if="subtitleMode !== 'none'" class="subtitle-custom-settings">
+              <div class="settings-divider"><span>Cấu hình Phụ đề</span></div>
+              <div class="subtitle-grid-advanced">
+                <div class="sub-setting-item">
+                  <label>Ngôn ngữ</label>
+                  <select v-model="subtitleLanguage" class="form-select-small" :disabled="subtitleMode === 'file'">
+                    <option value="vi">Tiếng Việt</option>
+                    <option value="en">Tiếng Anh</option>
+                    <option value="ja">Tiếng Nhật</option>
+                  </select>
+                </div>
+                <div class="sub-setting-item">
+                  <label>Phông chữ</label>
+                  <select v-model="subtitleFontName" class="form-select-small">
+                    <option value="Arial">Arial (Global)</option>
+                    <option value="Roboto">Roboto</option>
+                    <option value="Noto Sans JP" v-if="subtitleLanguage === 'ja'">Noto Sans JP</option>
+                    <option value="Be Vietnam Pro" v-if="subtitleLanguage === 'vi'">Be Vietnam Pro</option>
+                  </select>
+                </div>
+                <div class="sub-setting-item">
+                  <label>C cỡ chữ</label>
+                  <input type="number" v-model.number="subtitleFontSize" class="form-input-small" />
+                </div>
+                <div class="sub-setting-item">
+                  <label>Cách đáy</label>
+                  <input type="number" v-model.number="subtitleMarginV" class="form-input-small" />
+                </div>
               </div>
             </div>
             
-            <div class="form-group auto-caption-group">
-              <div class="checkbox-container">
-                <input 
-                  type="checkbox" 
-                  id="auto-caption-checkbox"
-                  v-model="isAutoCaption"
-                  @click="handleAutoCaptionClick"
-                  class="checkbox-input"
-                />
-                <label for="auto-caption-checkbox" class="checkbox-label">
-                  🎬 Auto caption
-                </label>
+            <div v-if="subtitleMode === 'auto' && audioFiles.length === 0" class="sub-warning-msg">
+              <p>⚠️ Cần có file audio để dùng tính năng AI</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cột phải: Settings & Actions -->
+        <div class="image-to-video-right-column">
+          <!-- Cấu hình ảnh Card -->
+          <div class="file-group settings-card-premium">
+            <h3 class="card-subtitle-main">⏱️ Cấu hình ảnh</h3>
+            <div class="form-group-grid">
+              <div class="form-item">
+                <label class="form-label-small">Thời gian / Ảnh</label>
+                <select v-model="imageDuration" class="form-select">
+                  <option v-for="d in durationOptions" :key="d" :value="d">{{ d }}s</option>
+                </select>
+              </div>
+              <div class="form-item">
+                <label class="form-label-small">Hiệu ứng ảnh</label>
+                <select v-model="imageEffectType" class="form-select">
+                  <option v-for="opt in imageEffectOptions" :key="opt.value" :value="opt.value">{{ opt.name }}</option>
+                </select>
               </div>
             </div>
           </div>
 
-          <!-- Button tạo video -->
-          <div class="form-actions">
-            <button 
-              class="btn-create-video" 
-              @click="createVideoFromImages" 
-              :disabled="isCreating"
-            >
-              {{ isCreating ? 'Đang tạo video...' : 'Tạo Video' }}
-            </button>
-            <button 
-              v-if="isCreating"
-              class="btn-stop-video" 
-              @click="stopVideoCreation"
-            >
-              Huỷ tiến trình
-            </button>
+          <!-- Chất lượng Card -->
+          <div class="file-group quality-card-premium">
+            <h3 class="card-subtitle-main">📺 Chất lượng video</h3>
+            <select v-model="videoQuality" class="form-select">
+              <option value="hd">720 (HD)</option>
+              <option value="fullhd">1080 (Full HD)</option>
+              <option value="2K">2K (2048x1080)</option>
+              <option value="4K">4K (3840x2160)</option>
+            </select>
           </div>
 
-          <!-- Status và Progress -->
-          <div :class="['download-status', statusType]" v-if="statusMessage">
-            <span>{{ statusMessage }}</span>
-            <button 
-              v-if="statusType === 'success' && videoFolderPath"
-              class="btn-open-folder-inline" 
-              @click="openVideoFolderFromPath"
-              title="Mở thư mục chứa video"
-            >
-              📁
-            </button>
+          <!-- Hiệu ứng Video Card -->
+          <div class="file-group effect-card-premium">
+            <h3 class="card-subtitle-main">✨ Hiệu ứng video</h3>
+            <VideoEffect :selectedEffect="videoEffectType" @update:selectedEffect="videoEffectType = $event" />
           </div>
-          <div v-if="isCreating" class="download-progress">
-            <div class="progress-bar">
-              <div class="progress-fill" :style="{ width: progress + '%' }"></div>
+
+          <!-- Thư mục lưu Card -->
+          <div class="file-group folder-card-premium">
+            <h3 class="card-subtitle-main">💾 Thư mục lưu</h3>
+            <div class="input-group">
+              <input type="text" v-model="outputFolder" class="form-input" placeholder="Chọn thư mục..." readonly />
+              <button class="btn-select-folder" @click="selectOutputFolder">Chọn</button>
             </div>
-            <div class="progress-text">{{ progress }}%</div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="form-actions-full">
+            <button class="btn-create-video-v2" @click="createVideoFromImages" :disabled="isCreating">
+              {{ isCreating ? 'Đang tạo video...' : 'Tạo Video' }}
+            </button>
+            <button v-if="isCreating" class="btn-stop-video-v2" @click="stopVideoCreation">Dừng</button>
+          </div>
+
+          <!-- Progress -->
+          <div v-if="isCreating" class="progress-container-v2">
+            <div class="progress-bar-v2"><div class="pf-v2" :style="{ width: progress + '%' }"></div></div>
+            <div class="pt-v2">{{ progress }}%</div>
+          </div>
+
+          <!-- Status -->
+          <div :class="['status-box-v2', statusType]" v-if="statusMessage">
+            <span>{{ statusMessage }}</span>
+            <button v-if="statusType === 'success' && videoFolderPath" class="btn-open-v2" @click="openVideoFolderFromPath">📁</button>
           </div>
         </div>
       </div>
@@ -202,6 +270,19 @@ const imageEffectOptions = [
 // Output
 const outputFolder = ref('')
 const isAutoCaption = ref(false)
+const logoPath = ref('')
+const logoPosition = ref('top_left')
+const logoMarginTop = ref(20)
+const logoMarginRight = ref(20)
+const logoMarginBottom = ref(20)
+const logoMarginLeft = ref(20)
+const subtitleMode = ref('none') // 'none', 'auto', 'file'
+const subtitlePath = ref('')
+const subtitleMarginV = ref(30)
+const subtitleFontSize = ref(58)
+const subtitleLanguage = ref('vi')
+const subtitleFontName = ref('Arial')
+
 const isCreating = ref(false)
 const statusMessage = ref('')
 const statusType = ref('info')
@@ -217,19 +298,56 @@ const videoHistory = ref([])
 
 const selectOutputFolder = async () => {
   try {
-    // Sử dụng Tauri Dialog API - nhất quán với selectImageFiles
     const selected = await open({
       directory: true,
       multiple: false
     })
-    
     if (selected) {
-      const folderPath = Array.isArray(selected) ? selected[0] : selected
-      outputFolder.value = folderPath
+      outputFolder.value = Array.isArray(selected) ? selected[0] : selected
     }
   } catch (error) {
     statusMessage.value = 'Lỗi khi chọn thư mục: ' + error
     statusType.value = 'error'
+  }
+}
+
+const selectLogoFile = async () => {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }]
+    })
+    if (selected) {
+      logoPath.value = Array.isArray(selected) ? selected[0] : selected
+    }
+  } catch (error) {
+    console.error('Lỗi khi chọn logo:', error)
+  }
+}
+
+const selectSubtitleFile = async () => {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Subtitles', extensions: ['ass', 'srt'] }]
+    })
+    if (selected) {
+      subtitlePath.value = Array.isArray(selected) ? selected[0] : selected
+      subtitleMode.value = 'file'
+    }
+  } catch (error) {
+    console.error('Lỗi khi chọn subtitle:', error)
+  }
+}
+
+const handleSubtitleModeChange = () => {
+  if (subtitleMode.value === 'auto') {
+    subtitlePath.value = ''
+    if (audioFiles.value.length === 0) {
+      isShowAudioRequiredModal.value = true
+    }
+  } else if (subtitleMode.value === 'none') {
+    subtitlePath.value = ''
   }
 }
 
@@ -295,6 +413,11 @@ const createVideoFromImages = async () => {
   statusType.value = 'info'
   videoFolderPath.value = null
   
+  // Tạo process_id để có thể stop
+  const timestampForId = Date.now();
+  const processId = `images_video_${timestampForId}`;
+  currentProcessId.value = processId;
+  
   try {
     progress.value = 20
     statusMessage.value = '⏳ Đang tạo video từ ảnh...'
@@ -310,7 +433,19 @@ const createVideoFromImages = async () => {
       videoEffectType: videoEffectType.value,
       audioFiles: audioFiles.value,
       outputFolder: outputFolder.value.trim(),
-      isAutoCaption: isAutoCaption.value
+      isAutoCaption: subtitleMode.value === 'auto',
+      logoPath: logoPath.value || null,
+      logoPosition: logoPosition.value,
+      logoMarginTop: logoMarginTop.value,
+      logoMarginRight: logoMarginRight.value,
+      logoMarginBottom: logoMarginBottom.value,
+      logoMarginLeft: logoMarginLeft.value,
+      subtitlePath: subtitleMode.value === 'file' ? (subtitlePath.value || null) : null,
+      subtitleMarginV: subtitleMarginV.value,
+      subtitleFontSize: subtitleFontSize.value,
+      subtitleLanguage: subtitleLanguage.value,
+      subtitleFontName: subtitleFontName.value,
+      processId: processId
     })
     
     progress.value = 100

@@ -1,3 +1,4 @@
+use crate::process::ProcessStore;
 use crate::utils::find_ffmpeg_by_os::{run_ffmpeg, get_best_encoder};
 use crate::utils::merge_audio_to_video::{merge_audio_without_caption, merge_audio_with_caption};
 use crate::file_audio::find_ffprobe;
@@ -7,6 +8,49 @@ use std::io::Write;
 use std::process::Command;
 use uuid::Uuid;
 use futures::future;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Semaphore;
+use std::collections::HashMap;
+
+lazy_static::lazy_static! {
+    static ref VIDEO_VIDEO_OUTPUT_FOLDERS: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+}
+
+/// Helper function to run ffmpeg and register it for cancellation
+async fn run_ffmpeg_with_cancellation(
+    mut cmd: tokio::process::Command,
+    process_id: &str,
+    processes: &tauri::State<'_, ProcessStore>,
+) -> Result<std::process::Output, String> {
+    let child = cmd.spawn().map_err(|e| format!("Lỗi khi spawn ffmpeg: {}", e))?;
+    let child_arc = Arc::new(tokio::sync::Mutex::new(Some(child)));
+    
+    // Đăng ký process để có thể stop
+    {
+        let mut procs = processes.lock().unwrap();
+        procs.entry(process_id.to_string()).or_insert_with(Vec::new).push(child_arc.clone());
+    }
+    
+    // Đợi process hoàn thành
+    let result = {
+        let mut child_lock = child_arc.lock().await;
+        if let Some(child) = child_lock.take() {
+            child.wait_with_output().await.map_err(|e| e.to_string())
+        } else {
+            Err("Tiến trình đã bị dừng".to_string())
+        }
+    };
+    
+    // Sau khi xong, remove khỏi store
+    {
+        let mut procs = processes.lock().unwrap();
+        if let Some(vec) = procs.get_mut(process_id) {
+            vec.retain(|p| !Arc::ptr_eq(p, &child_arc));
+        }
+    }
+    
+    result
+}
 
 /// Helper function để tạo timestamp
 fn get_timestamp() -> u64 {
@@ -233,7 +277,7 @@ async fn prepare_video_before_merge(
     cmd.arg("-y")
         .arg(output_path);
     
-    let output = cmd.output().await
+    let output = cmd.output().await // Ở đây chưa có process_id nên cứ dùng output() bình thường hoặc truyền vào sau
         .map_err(|e| format!("Lỗi khi chuẩn bị video: {}", e))?;
     
     if !output.status.success() {
@@ -273,6 +317,8 @@ async fn concat_without_effects_fast(
     segment_files: Vec<String>,
     output_path: &str,
     target_height: i32,
+    process_id: &str,
+    processes: &tauri::State<'_, ProcessStore>,
 ) -> Result<(), String> {
     if segment_files.is_empty() {
         return Err("Cần ít nhất một video segment".to_string());
@@ -289,8 +335,7 @@ async fn concat_without_effects_fast(
             .arg("-y")
             .arg(output_path);
         
-        let output = cmd.output().await
-            .map_err(|e| format!("Lỗi khi xóa audio từ video: {}", e))?;
+        let output = run_ffmpeg_with_cancellation(cmd, process_id, processes).await?;
         
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
@@ -341,9 +386,8 @@ async fn concat_without_effects_fast(
         .arg("-y")
         .arg(output_path);
     
-    // Chạy và đợi process hoàn thành
-    let output = cmd.output().await
-        .map_err(|e| format!("Lỗi khi chạy ffmpeg concat: {}", e))?;
+    // Chạy với khả năng stop
+    let output = run_ffmpeg_with_cancellation(cmd, process_id, processes).await?;
     
     // Cleanup file concat list
     let _ = fs::remove_file(&concat_list_file);
@@ -453,6 +497,8 @@ async fn concat_videos_with_transitions(
     target_height: i32,
     remove_original_audio: bool,
     no_black_bars: bool,
+    process_id: &str,
+    processes: &tauri::State<'_, ProcessStore>,
 ) -> Result<(), String> {
     if video_files.is_empty() {
         return Err("Cần ít nhất một video".to_string());
@@ -477,29 +523,14 @@ async fn concat_videos_with_transitions(
         filter_parts.push(format!("[{}:v]{}[v{}]", i, base_scale, i));
     }
 
-    let final_label = if video_effect_type == "none" || video_effect_type.is_empty() {
-        // GHÉP THUẦN TÚY (Dùng concat filter)
-        let mut concat_str = String::new();
-        for i in 0..total_videos {
-            concat_str.push_str(&format!("[v{}]", i));
-        }
-        filter_parts.push(format!("{}concat=n={}:v=1:a=0[vout]", concat_str, total_videos));
-        "[vout]".to_string()
-    } else {
-        // CÓ HIỆU ỨNG (XFade)
-        let mut current_offset = 0.0;
-        let mut last_label = "[v0]".to_string();
-        for i in 1..total_videos {
-            current_offset += video_durations[i-1] - transition_duration;
-            let joined_label = format!("[vjoin{}]", i);
-            filter_parts.push(format!(
-                "{}[v{}]xfade=transition={}:duration={}:offset={:.3}{}",
-                last_label, i, video_effect_type, transition_duration, current_offset, joined_label
-            ));
-            last_label = joined_label;
-        }
-        last_label
-    };
+    // GHÉP THUẦN TÚY (Dùng concat filter) - USER REQUEST: Bỏ hiệu ứng, chỉ ghép nối tiếp
+    let mut concat_str = String::new();
+    for i in 0..total_videos {
+        concat_str.push_str(&format!("[v{}]", i));
+    }
+    // a=1 để ghép cả audio
+    filter_parts.push(format!("{}concat=n={}:v=1:a=0[vout]", concat_str, total_videos));
+    let final_label = "[vout]".to_string();
 
     // XỬ LÝ AUDIO:
     // Nếu không xóa audio gốc (remove_original_audio = false),
@@ -519,11 +550,8 @@ async fn concat_videos_with_transitions(
          None
     };
 
-    let total_duration = if video_effect_type == "none" {
-        video_durations.iter().sum::<f64>()
-    } else {
-        video_durations.iter().sum::<f64>() - (total_videos as f64 - 1.0) * transition_duration
-    };
+    // Total duration là tổng duration các video (vì không còn transition chồng lấn)
+    let total_duration = video_durations.iter().sum::<f64>();
 
     // Bước 3: Chạy FFmpeg
     let mut cmd = run_ffmpeg()?;
@@ -554,23 +582,18 @@ async fn concat_videos_with_transitions(
     // if remove_original_audio { cmd.arg("-an"); } // Đã xử lý bằng map ở trên rồi
     
     if encoder == "hevc_videotoolbox" {
-        // Cấu hình Bitrate "Max Sharpness" cho HEVC (Thách thức CPU)
-        // 1080p HEVC @ 12M (Cao hơn cả bluray rip)
-        // 4K HEVC @ 50M (Chất lượng gốc máy quay)
-        let bitrate = match target_height {
-            h if h <= 720 => "6000k",   // HD siêu nét
-            h if h <= 1080 => "12000k", // FHD 12Mbps (Không thể vỡ hạt)
-            h if h <= 1440 => "25000k", // 2K
-            _ => "50000k",              // 4K 50Mbps
-        };
+        // Cấu hình Quality-Based (Thay vì Bitrate-Based)
+        // -q:v 65: Mức chất lượng cao (High Quality) của Apple Encoder. 
+        // Nó tương tự CRF, tự động dồn bitrate vào nơi nhiều chi tiết => GIỮ ĐỘ NÉT 100%.
         
-        cmd.arg("-b:v").arg(bitrate)
-           // Allow spikes for complex scenes
-           .arg("-maxrate:v").arg(format!("{}k", bitrate.replace("k", "").parse::<i32>().unwrap_or(5000) * 2)) 
-           .arg("-bufsize:v").arg("4M")
-           .arg("-tag:v").arg("hvc1") // Tag quan trọng để Mac/iPhone nhận diện đúng
+        cmd.arg("-q:v").arg("65") 
+           .arg("-tag:v").arg("hvc1") 
            .arg("-realtime").arg("0")
-           .arg("-profile:v").arg("main");
+           .arg("-profile:v").arg("main")
+           // FIX MÀU: Ép hệ màu BT.709 (HD/4K Standard) để không bị nhợt nhạt trên Mac
+           .arg("-color_primaries").arg("1")
+           .arg("-color_trc").arg("1")
+           .arg("-colorspace").arg("1");
            
     } else if encoder == "h264_videotoolbox" {
         // Fallback case (ít dùng nếu đã ép hevc)
@@ -583,7 +606,7 @@ async fn concat_videos_with_transitions(
 
     cmd.arg("-pix_fmt").arg("yuv420p").arg("-y").arg(output_path);
 
-    let output = cmd.output().await.map_err(|e| format!("Lỗi FFmpeg: {}", e))?;
+    let output = run_ffmpeg_with_cancellation(cmd, process_id, processes).await?;
     if !output.status.success() {
         return Err(format!("FFmpeg lỗi: {}", String::from_utf8_lossy(&output.stderr)));
     }
@@ -604,7 +627,9 @@ pub async fn create_video_from_video(
     video_quality: String,
     video_aspect_ratio: String,
     remove_original_audio: bool,
-    merge_mode: String, // Thêm tham số merge_mode: "fast" | "convert"
+    merge_mode: String,
+    process_id: String,
+    processes: tauri::State<'_, ProcessStore>,
 ) -> Result<String, String> {
     if video_files.is_empty() {
         return Err("Cần ít nhất một video".to_string());
@@ -650,7 +675,7 @@ pub async fn create_video_from_video(
         cmd.arg("-c:v").arg("copy")
            .arg("-y").arg(&output_path);
 
-        let output = cmd.output().await.map_err(|e| e.to_string())?;
+        let output = run_ffmpeg_with_cancellation(cmd, &process_id, &processes).await?;
         
         // Cleanup file list
         let _ = fs::remove_file(concat_list_path);
@@ -714,6 +739,8 @@ pub async fn create_video_from_video(
             target_height,
             remove_original_audio,
             no_black_bars,
+            &process_id,
+            &processes,
         ).await?;
         temp_path_str
     };
@@ -805,6 +832,29 @@ pub async fn create_video_from_video(
     }
 
     Ok(format!("Video đã được tạo thành công! {}", output_path))
+}
+
+#[tauri::command]
+pub async fn stop_video_video_creation(
+    process_id: String,
+    processes: tauri::State<'_, ProcessStore>,
+) -> Result<String, String> {
+    // Lấy và remove danh sách process từ ProcessStore
+    let child_arcs = {
+        let mut procs = processes.lock().unwrap();
+        procs.remove(&process_id).unwrap_or_default()
+    };
+    
+    // Kill tất cả process đang chạy cho ID này
+    for child_arc in child_arcs {
+        let mut child_lock = child_arc.lock().await;
+        if let Some(mut child) = child_lock.take() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+    }
+    
+    Ok("Đã dừng tiến trình ghép video".to_string())
 }
 
 

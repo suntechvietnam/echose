@@ -22,6 +22,7 @@ pub async fn generate_tts(
     bass: i32,
     treble: i32,
     output_folder: Option<String>,
+    reference_audio_path: Option<String>,
 ) -> Result<String, String> {
     // 1. Path Setup
     let filename = format!("tts_{}_{}.mp3", voice, Uuid::new_v4());
@@ -64,6 +65,26 @@ pub async fn generate_tts(
         
         let bytes = res.bytes().await.map_err(|e| e.to_string())?;
         fs::write(&raw_path, bytes).map_err(|e| e.to_string())?;
+    } else if provider == "metavoice" {
+        println!("Đang tạo giọng nói bằng MetaVoice (Local)...");
+        
+        let py_script = "metavoice_runner.py";
+        let venv_python = "python_libs/metavoice-src/venv/bin/python3";
+        
+        let mut cmd = Command::new(venv_python);
+        cmd.arg(py_script)
+           .arg("--text").arg(&text)
+           .arg("--output").arg(&raw_path_str);
+        
+        if let Some(ref_path) = reference_audio_path {
+            cmd.arg("--reference").arg(ref_path);
+        }
+
+        let out = cmd.output().await.map_err(|e| format!("Không thể chạy MetaVoice script: {}", e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("Lỗi MetaVoice: {}", err));
+        }
     } else {
         // Fallback to Edge-TTS
         println!("Đang tạo giọng nói bằng Edge-TTS...");

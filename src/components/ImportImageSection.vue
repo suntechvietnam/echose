@@ -36,12 +36,14 @@
     >
       <template #item="{ element: file, index }">
         <div class="file-item">
-          <div
-            class="file-item-info"
-            :style="{
-              backgroundImage: `url(${imageUrls[file] || getImageUrl(file)})`
-            }"
-          >
+          <img 
+            v-if="imageUrls[file]"
+            :src="imageUrls[file]"
+            class="file-item-img"
+            @error="handleImageError(file)"
+          />
+          <div v-else class="file-item-loading">
+            <span class="spinner-small"></span>
           </div>
           <button class="file-item-remove" @click="removeImageFile(index)" title="Xóa">✕</button>
         </div>
@@ -86,21 +88,23 @@ const isShowConfirm = ref(false)
 // Dùng cho vuedraggable: với array string, key chính là giá trị string
 const imageItemKey = (filePath) => filePath
 
-const getImageUrl = (filePath) => {
-  if (!filePath) return null
+// Tải URL cho danh sách file
+const loadImageUrls = (files) => {
+  files.forEach(file => {
+    if (!imageUrls.value[file]) {
+      try {
+        const url = convertFileSrc(file)
+        imageUrls.value[file] = url
+      } catch (error) {
+        console.error('Lỗi chuyển đổi đường dẫn ảnh:', error, file)
+      }
+    }
+  })
+}
 
-  if (imageUrls.value[filePath]) {
-    return imageUrls.value[filePath]
-  }
-
-  try {
-    const url = convertFileSrc(filePath)
-    imageUrls.value[filePath] = url
-    return url
-  } catch (error) {
-    console.error('Error converting file path:', error, filePath)
-    return null
-  }
+// Gọi hàm tải URL ngay từ đầu nếu có dữ liệu cũ
+if (imageFiles.value.length > 0) {
+  loadImageUrls(imageFiles.value)
 }
 
 const selectImageFiles = async () => {
@@ -121,8 +125,8 @@ const selectImageFiles = async () => {
       if (!imageFiles.value.includes(file)) {
         imageFiles.value.push(file)
       }
-      getImageUrl(file)
     }
+    loadImageUrls(imageFiles.value)
 
     emit('update:imageFiles', imageFiles.value)
     emit('images-selected', imageFiles.value)
@@ -131,8 +135,12 @@ const selectImageFiles = async () => {
   }
 }
 
-const handleImageError = (event) => {
-  console.error('Error loading image:', event?.target?.src)
+const handleImageError = (file) => {
+  console.error('Không thể load ảnh:', file)
+  // Thử load lại một lần nữa nếu lỗi
+  try {
+    imageUrls.value[file] = convertFileSrc(file)
+  } catch (e) {}
 }
 
 const removeImageFile = (index) => {
@@ -208,9 +216,7 @@ const shuffleImages = async () => {
 
 watch(() => props.modelValue, (newValue) => {
   imageFiles.value = [...newValue]
-  newValue.forEach(file => {
-    getImageUrl(file)
-  })
+  loadImageUrls(newValue)
 })
 </script>
 
@@ -283,12 +289,34 @@ watch(() => props.modelValue, (newValue) => {
   font-weight: 500;
 }
 
-/* Layout danh sách (giống audio) */
+/* Layout danh sách (giới hạn 3 hàng, scroll nếu nhiều hơn) */
 .file-list {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
   flex: 1;
+  max-height: 280px; /* ~3 rows (80px + gap) */
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Custom scrollbar */
+.file-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.file-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.file-list::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.5);
+  border-radius: 3px;
+}
+
+.file-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.7);
 }
 
 .file-item {
@@ -298,19 +326,44 @@ watch(() => props.modelValue, (newValue) => {
   overflow: hidden;
   cursor: move;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  aspect-ratio: 1;
 }
 
+.file-item:hover {
+  transform: scale(1.02);
+  border-color: rgba(102, 126, 234, 0.5);
+}
 
-.file-item-info {
+.file-item-img {
   height: 100%;
-  min-height: 80px;
   width: 100%;
-  position: relative;
-  background-size: contain;
-  background-position: center;
-  background-repeat: no-repeat;
-  border-radius: 6px;
+  object-fit: cover;
+  display: block;
+}
+
+.file-item-loading {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.spinner-small {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(102, 126, 234, 0.3);
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .file-item-remove {

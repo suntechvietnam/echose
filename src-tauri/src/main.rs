@@ -9,16 +9,22 @@ mod image_to_video;
 mod process;
 mod utils;
 mod video_to_video;
+mod video_to_image;
 mod tts;
+mod download;
 
 use process::ProcessStore;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn main() {
     let processes: ProcessStore = Arc::new(Mutex::new(HashMap::new()));
+    
+    // Khởi tạo state cho download
+    let download_state = download::DownloadState {
+        child_process: Arc::new(Mutex::new(None)),
+    };
     
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -28,17 +34,23 @@ pub fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .manage(processes)
+        .manage(download_state) // Đăng ký download state
         .invoke_handler(tauri::generate_handler![
             // Mở thư mục bằng file explorer mặc định
             filesystem::open_folder,
             filesystem::get_home_dir,
             // Image to video
             image_to_video::create_video_from_images,
+            image_to_video::create_video_from_ai_image,
             image_to_video::stop_image_video_creation,
             // Video to video
             video_to_video::create_video_from_video,
-            // Audio utilities
+            video_to_video::stop_video_video_creation,
             file_audio::get_audio_duration,
+            file_audio::extract_audio_from_video,
+            // Video to image
+            video_to_image::extract_images_from_video_periodic,
+            video_to_image::stop_image_extraction,
             // Audio to text (whisper-rs) - ASS format
             audio_to_text_ass::convert_audio_to_ass,
             audio_to_text_ass::segments_to_ass_string,
@@ -50,7 +62,10 @@ pub fn main() {
             audio_to_text_txt::convert_audio_to_txt,
             audio_to_text_txt::segments_to_txt_string,
             // AI Voice (TTS)
-            tts::generate_tts
+            tts::generate_tts,
+            // Download
+            download::download_video,
+            download::stop_download // Đăng ký command dừng download
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

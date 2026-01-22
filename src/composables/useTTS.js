@@ -39,11 +39,12 @@ export function useTTS() {
                 volume: volumeStr,
                 bass: parseInt(bass),
                 treble: parseInt(treble),
-                outputFolder
+                outputFolder,
+                referenceAudioPath: voiceConfig.referencePath || null
             })
 
             lastGeneratedPath.value = filePath
-            lastAudioUrl.value = convertFileSrc(filePath)
+            lastAudioUrl.value = filePath.startsWith('http') ? filePath : convertFileSrc(filePath)
             console.log('✅ Generated TTS file:', filePath)
             console.log('🔗 Asset URL:', lastAudioUrl.value)
             return { filePath, audioUrl: lastAudioUrl.value }

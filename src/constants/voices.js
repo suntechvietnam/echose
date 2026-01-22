@@ -3,6 +3,7 @@ export const LANGUAGES = [
     { code: 'en', name: 'English', flag: '🇺🇸' },
     { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
     { code: 'ko', name: 'Korean', flag: '🇰🇷' },
+    { code: 'meta', name: 'MetaVoice', flag: '💎' },
 ];
 
 export const VOICES_DATA = {

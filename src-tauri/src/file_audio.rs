@@ -162,3 +162,108 @@ pub async fn get_audio_duration(file_path: String) -> Result<f64, String> {
     Ok(duration)
 }
 
+/// Kiểm tra xem file video có chứa stream audio hay không
+async fn has_audio_stream(file_path: &str) -> Result<bool, String> {
+    let ffprobe_path = find_ffprobe().ok_or_else(|| {
+        "Không tìm thấy ffprobe".to_string()
+    })?;
+    
+    let output = std::process::Command::new(&ffprobe_path)
+        .arg("-v").arg("error")
+        .arg("-select_streams").arg("a")
+        .arg("-show_entries").arg("stream=index")
+        .arg("-of").arg("csv=p=0")
+        .arg(file_path)
+        .output()
+        .map_err(|e| format!("Lỗi khi chạy ffprobe: {}", e))?;
+    
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(!result.is_empty())
+}
+
+use crate::process::ProcessStore;
+use crate::utils::find_ffmpeg_by_os::run_ffmpeg;
+use std::sync::{Arc, Mutex};
+
+/// Trích xuất audio từ video file
+#[tauri::command]
+pub async fn extract_audio_from_video(
+    video_path: String,
+    output_path: String,
+    format: String, // "mp3" hoặc "m4a"
+    process_id: String,
+    processes: tauri::State<'_, ProcessStore>,
+) -> Result<String, String> {
+    // 1. Kiểm tra đầu vào
+    let video_p = std::path::Path::new(&video_path);
+    if !video_p.exists() {
+        return Err(format!("File video không tồn tại tại: {}", video_path));
+    }
+
+    // Kiểm tra xem video có audio không
+    if !has_audio_stream(&video_path).await? {
+        return Err("Video này không có âm thanh (Audio stream) để trích xuất.".to_string());
+    }
+
+    let output_p = std::path::Path::new(&output_path);
+    if let Some(parent) = output_p.parent() {
+        if !parent.exists() {
+            return Err(format!("Thư mục lưu không tồn tại: {:?}", parent));
+        }
+    }
+
+    let mut cmd = run_ffmpeg()?;
+    
+    cmd.arg("-i").arg(&video_path)
+       .arg("-vn"); // Không lấy video
+    
+    // 2. Cấu hình Audio Codec
+    if format == "mp3" {
+        // Thử dùng libmp3lame, nếu lỗi FFmpeg thường sẽ báo thiếu encoder
+        cmd.arg("-acodec").arg("libmp3lame")
+           .arg("-q:a").arg("2"); 
+    } else {
+        // M4A/AAC
+        cmd.arg("-acodec").arg("aac")
+           .arg("-b:a").arg("192k");
+    }
+    
+    cmd.arg("-y").arg(&output_path);
+
+    // Debug: In command ra console của Tauri (Terminal) để xem
+    println!("Running FFmpeg: {:?}", cmd);
+    
+    let child = cmd.spawn().map_err(|e| format!("Lỗi khi khởi chạy FFmpeg: {}", e))?;
+    let child_arc = Arc::new(tokio::sync::Mutex::new(Some(child)));
+    
+    // Đăng ký process
+    {
+        let mut procs = processes.lock().unwrap();
+        procs.entry(process_id.to_string()).or_insert_with(Vec::new).push(child_arc.clone());
+    }
+    
+    // Đợi process hoàn thành và lấy output để debug nếu lỗi
+    let output = {
+        let mut child_lock = child_arc.lock().await;
+        if let Some(child) = child_lock.take() {
+            child.wait_with_output().await.map_err(|e| format!("Lỗi khi đợi ffmpeg: {}", e))?
+        } else {
+            return Err("Tiến trình đã bị dừng".to_string());
+        }
+    };
+    
+    // Cleanup
+    {
+        let mut procs = processes.lock().unwrap();
+        if let Some(vec) = procs.get_mut(&process_id) {
+            vec.retain(|p| !Arc::ptr_eq(p, &child_arc));
+        }
+    }
+    
+    if !output.status.success() {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFmpeg Error: {}", error_msg));
+    }
+    
+    Ok(format!("Trích xuất audio thành công: {}", output_path))
+}

@@ -1,6 +1,6 @@
 use crate::process::ProcessStore;
 use crate::utils::find_ffmpeg_by_os::{find_ffmpeg_or_error, run_ffmpeg, get_best_encoder};
-use crate::utils::merge_audio_to_video::{merge_audio_without_caption, merge_audio_with_caption};
+use crate::utils::merge_audio_to_video::{merge_audio_without_caption, merge_audio_with_caption, merge_video_all_in_one};
 use std::path::PathBuf;
 use std::fs;
 use std::io::Write;
@@ -160,12 +160,14 @@ async fn create_single_segment(
     image_file: &str,
     index: usize,
     image_duration: i32,
-    _width: i32,  // Reserved for future use
-    _height: i32,  // Reserved for future use
-    _total_frames: i32,  // Reserved for future use
-    filter: &str,  // Filter string đã được build sẵn
+    _width: i32,
+    _height: i32,
+    _total_frames: i32,
+    filter: &str,
     preset: &str,
     crf: &str,
+    process_id: &str,
+    processes: &ProcessStore,
 ) -> Result<String, String> {
     let segment_file = work_dir.join(format!("segment_{:04}.mp4", index));
     let segment_path = segment_file.to_string_lossy().to_string();
@@ -186,21 +188,44 @@ async fn create_single_segment(
         .arg("-vsync")
         .arg("cfr"); // Constant framerate để đảm bảo video không bị đứng
     
-    let encoder = get_best_encoder();
+    let mut encoder = get_best_encoder();
+    if encoder == "h264_videotoolbox" {
+        encoder = "hevc_videotoolbox"; // Force HEVC for Images
+    }
+    
     cmd.arg("-c:v").arg(encoder);
     
     if encoder == "libx264" {
         cmd.arg("-preset").arg(preset).arg("-crf").arg(crf);
-    } else if encoder == "h264_videotoolbox" {
-        // Cấu hình bitrate dựa trên resolution
-        let bitrate = match _height {
-            h if h <= 720 => "8M",
-            h if h <= 1080 => "15M",
-            h if h <= 1440 => "30M",
-            _ => "50M",
-        };
-        cmd.arg("-b:v").arg(bitrate)
-           .arg("-realtime").arg("0");
+    } else if encoder == "hevc_videotoolbox" {
+        // UPGRADE: Chuyển sang HEVC Quality-based nếu có thể (như video_to_video)
+        // Tuy nhiên hàm create_single_segment đang nhận encoder từ get_best_encoder() 
+        // vốn trả về h264_videotoolbox. Ta sẽ override ở đây để dùng HEVC cho xịn.
+        
+        // Remove previous -c:v arg if possible or just override
+        // Rust Command doesn't support removing args easily. 
+        // Instead, we trust the user has a Mac with HEVC.
+        
+        // Sửa lại logic: Thay vì check encoder string, ta check OS và ép dùng hevc_videotoolbox
+        // Nhưng để an toàn, ta dùng logic tương tự video_to_video:
+        
+        // "h264_videotoolbox" detected -> Force HEVC
+        // let hevc_encoder = "hevc_videotoolbox"; (Đã set ở trên)
+        
+        // Xóa arg -c:v cũ (Workaround: pop arg ko được, nên ta sẽ phải sửa từ đoạn gọi get_best_encoder)
+        // TẠM THỜI: Để đơn giản, ta cứ dùng arg bitrate/quality cho encoder hiện tại, 
+        // nhưng nếu là Mac, ta sẽ thêm tag và quality mode thay vì bitrate.
+        
+        // Cấu hình Quality-Based cho Mac (Nét căng, Màu chuẩn)
+        cmd.arg("-q:v").arg("65") 
+           .arg("-tag:v").arg("hvc1")
+           .arg("-realtime").arg("0")
+           .arg("-profile:v").arg("main")
+           // FIX MÀU:
+           .arg("-color_primaries").arg("1")
+           .arg("-color_trc").arg("1")
+           .arg("-colorspace").arg("1");
+           
     } else if encoder.contains("nvenc") {
         cmd.arg("-cq").arg(crf).arg("-preset").arg("p4");
     }
@@ -218,16 +243,77 @@ async fn create_single_segment(
         .arg("-y")
         .arg(&segment_path);
     
-    // Chạy và đợi process hoàn thành
-    let output = cmd.output().await
-        .map_err(|e| format!("Lỗi khi chạy ffmpeg cho segment {}: {}", index + 1, e))?;
+    // Chạy và spawn process
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("Lỗi khi spawn ffmpeg cho segment {}: {}", index + 1, e))?;
     
-    if !output.status.success() {
-        let error_msg = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Lỗi khi tạo segment {}: {}", index + 1, error_msg));
+    let child_arc = Arc::new(tokio::sync::Mutex::new(Some(child)));
+    
+    // Đăng ký process để có thể stop
+    {
+        let mut procs = processes.lock().unwrap();
+        procs.entry(process_id.to_string()).or_insert_with(Vec::new).push(child_arc.clone());
+    }
+    
+    // Đợi process hoàn thành
+    let status = {
+        let mut child_lock = child_arc.lock().await;
+        if let Some(mut child) = child_lock.take() {
+            child.wait().await.map_err(|e| format!("Lỗi khi đợi segment {}: {}", index + 1, e))?
+        } else {
+            return Err(format!("Segment {} đã bị dừng trước khi bắt đầu", index + 1));
+        }
+    };
+    
+    // Xong thì remove khỏi store (tùy chọn, stop_image_video_creation cũng dọn dẹp rồi)
+    {
+        let mut procs = processes.lock().unwrap();
+        if let Some(vec) = procs.get_mut(process_id) {
+            vec.retain(|p| !Arc::ptr_eq(p, &child_arc));
+        }
+    }
+    
+    if !status.success() {
+        return Err(format!("Lỗi khi tạo segment {} (exit code {:?})", index + 1, status.code()));
     }
     
     Ok(segment_path)
+}
+
+/// Helper function to run ffmpeg and register it for cancellation
+async fn run_ffmpeg_with_cancellation(
+    mut cmd: tokio::process::Command,
+    process_id: &str,
+    processes: &tauri::State<'_, ProcessStore>,
+) -> Result<std::process::Output, String> {
+    let child = cmd.spawn().map_err(|e| format!("Lỗi khi spawn ffmpeg: {}", e))?;
+    let child_arc = Arc::new(tokio::sync::Mutex::new(Some(child)));
+    
+    // Đăng ký process để có thể stop
+    {
+        let mut procs = processes.lock().unwrap();
+        procs.entry(process_id.to_string()).or_insert_with(Vec::new).push(child_arc.clone());
+    }
+    
+    // Đợi process hoàn thành
+    let result = {
+        let mut child_lock = child_arc.lock().await;
+        if let Some(child) = child_lock.take() {
+            child.wait_with_output().await.map_err(|e| e.to_string())
+        } else {
+            Err("Tiến trình đã bị dừng".to_string())
+        }
+    };
+    
+    // Sau khi xong, remove khỏi store (chỉ remove chính nó khỏi Vec)
+    {
+        let mut procs = processes.lock().unwrap();
+        if let Some(vec) = procs.get_mut(process_id) {
+            vec.retain(|p| !Arc::ptr_eq(p, &child_arc));
+        }
+    }
+    
+    result
 }
 
 /// Tạo video từ danh sách ảnh với các hiệu ứng và chất lượng tùy chọn
@@ -242,7 +328,19 @@ pub async fn create_video_from_images(
     audio_files: Vec<String>,
     output_folder: String,
     is_auto_caption: bool,
-    _processes: tauri::State<'_, ProcessStore>,  // Reserved for future use
+    logo_path: Option<String>,
+    logo_position: Option<String>,
+    logo_margin_top: i32,
+    logo_margin_right: i32,
+    logo_margin_bottom: i32,
+    logo_margin_left: i32,
+    subtitle_path: Option<String>,
+    subtitle_margin_v: i32,
+    subtitle_font_size: i32,
+    subtitle_language: String,
+    subtitle_font_name: String,
+    process_id: String,
+    processes: tauri::State<'_, ProcessStore>, 
 ) -> Result<String, String> {
     if image_files.is_empty() {
         return Err("Cần ít nhất một ảnh".to_string());
@@ -318,6 +416,8 @@ pub async fn create_video_from_images(
     let video_quality_arc = Arc::new(video_quality.clone());
     
     // Tạo tasks để chạy song song với giới hạn concurrent
+    let processes_store = processes.inner().clone();
+    let process_id_clone_for_tasks = process_id.clone();
     let mut tasks = Vec::new();
     for (index, image_file) in image_files.iter().enumerate() {
         let ffmpeg_path_clone = ffmpeg_path_arc.clone();
@@ -326,6 +426,8 @@ pub async fn create_video_from_images(
         let video_quality_clone = video_quality_arc.clone();
         let image_file_clone = image_file.clone();
         let permit = semaphore.clone();
+        let process_id_task = process_id_clone_for_tasks.clone();
+        let processes_task = processes_store.clone();
         
         // Build filter riêng cho từng segment (trước khi vào async block để tránh Send issue)
         // Mỗi segment có thể có index khác nhau nên cần build riêng
@@ -356,6 +458,8 @@ pub async fn create_video_from_images(
                 &segment_filter,
                 preset,
                 crf,
+                &process_id_task,
+                &processes_task,
             ).await
         });
         
@@ -400,10 +504,12 @@ pub async fn create_video_from_images(
             transition_duration,
             &final_video_path_str,
             false, // Không scale vì segments đã cùng resolution
+            &process_id,
+            &processes,
         ).await?;
         
         // Lưu output file path và folder vào HashMap
-        let process_id = format!("images_video_{}", timestamp);
+        // let process_id = format!("images_video_{}", timestamp); // Dùng process_id từ frontend
         {
             let mut files = IMAGE_VIDEO_OUTPUT_FILES.lock().unwrap();
             files.insert(process_id.clone(), final_video_path_str.clone());
@@ -419,55 +525,64 @@ pub async fn create_video_from_images(
         final_video_path_str
     };
     
-    // Xử lý audio nếu có (tùy chọn không bắt buộc)
-    let final_output_path = if !audio_files.is_empty() {
+    // Xử lý HẬU KỲ: Audio + Logo + Subtitle (Master Merge)
+    let final_output_path = {
+        // Tạo tên file cuối cùng
+        let final_filename = format!("echose_final_{}.mp4", timestamp);
+        let final_path = output_path.join(&final_filename);
+        let final_path_str = final_path.to_string_lossy().to_string();
         
-        // Tạo tên file cuối cùng với audio
-        let final_with_audio_filename = format!("final_video_with_audio_{}.mp4", timestamp);
-        let final_with_audio_path = output_path.join(&final_with_audio_filename);
-        let final_with_audio_path_str = final_with_audio_path.to_string_lossy().to_string();
-        
-        // Lưu số lượng audio files trước khi move
-        let audio_files_count = audio_files.len();
-        
-        // Bước 1: Merge audio files nếu có nhiều hơn 1 file
-        let merged_audio_path = if audio_files_count > 1 {
-            let merged_audio_filename = format!("merged_audio_{}.mp3", timestamp);
-            let merged_audio_file = output_path.join(&merged_audio_filename);
-            let merged_audio_path_str = merged_audio_file.to_string_lossy().to_string();
-            
-            merge_audio_files(audio_files, &merged_audio_path_str).await
-                .map_err(|e| format!("Lỗi khi merge audio: {}", e))?;
-            
-            merged_audio_path_str
+        // 1. Chuẩn bị Audio (Merge nếu nhiều file)
+        let audio_to_use = if !audio_files.is_empty() {
+             let audio_files_count = audio_files.len();
+             if audio_files_count > 1 {
+                let merged_audio_filename = format!("merged_audio_{}.mp3", timestamp);
+                let merged_audio_file = output_path.join(&merged_audio_filename);
+                let merged_audio_path_str = merged_audio_file.to_string_lossy().to_string();
+                
+                merge_audio_files(audio_files, &merged_audio_path_str, &process_id, &processes).await
+                    .map_err(|e| format!("Lỗi khi merge audio: {}", e))?;
+                
+                Some(merged_audio_path_str)
+            } else {
+                Some(audio_files[0].clone())
+            }
         } else {
-            // Chỉ có 1 file audio, sử dụng trực tiếp
-            let single_audio_path = audio_files[0].clone();
-            // Drop audio_files để tránh warning về unused value
-            drop(audio_files);
-            single_audio_path
+            None
         };
-        
-        // Bước 2: Merge video với audio (video sẽ loop để match audio duration)
-        
-        merge_video_with_audio(
+
+        // 2. Gọi MASTER MERGE
+        merge_video_all_in_one(
             &final_video_path,
-            &merged_audio_path,
-            &final_with_audio_path_str,
-            is_auto_caption, // Use user's choice for auto caption
-        ).await.map_err(|e| format!("Lỗi khi merge video với audio: {}", e))?;
-        
-        // Xóa file audio tạm nếu đã merge nhiều file
-        if audio_files_count > 1 {
-            let _ = fs::remove_file(&merged_audio_path);
+            audio_to_use.as_deref(),
+            logo_path.as_deref(),
+            logo_position.as_deref(),
+            logo_margin_top,
+            logo_margin_right,
+            logo_margin_bottom,
+            logo_margin_left,
+            subtitle_path.as_deref(),
+            subtitle_margin_v,
+            subtitle_font_size,
+            Some(&subtitle_language),
+            Some(&subtitle_font_name),
+            is_auto_caption,
+            &final_path_str,
+        ).await.map_err(|e| format!("Lỗi khi xử lý hậu kỳ (Audio/Logo/Sub): {}", e))?;
+
+        // 3. Cleanup
+        // Xóa file video trung gian (không có logo/audio/sub)
+        if final_path_str != final_video_path {
+            let _ = fs::remove_file(&final_video_path);
         }
-        
-        // Xóa file video gốc (không có audio)
-        let _ = fs::remove_file(&final_video_path);
-        
-        final_with_audio_path_str
-    } else {
-        final_video_path
+        // Xóa file audio tạm nếu có
+        if let Some(ref path) = audio_to_use {
+            if path.contains("merged_audio_") {
+                let _ = fs::remove_file(path);
+            }
+        }
+
+        final_path_str
     };
     
     Ok(format!("Video đã được tạo thành công! {}", final_output_path))
@@ -479,28 +594,22 @@ pub async fn stop_image_video_creation(
     process_id: String,
     processes: tauri::State<'_, ProcessStore>,
 ) -> Result<String, String> {
-    // Kiểm tra process_id có đúng format không
-    if !process_id.starts_with("images_video_") {
-        return Err("Process ID không hợp lệ cho image video creation".to_string());
-    }
-    
-    // Lấy và remove process từ ProcessStore để giải phóng memory
-    let child_opt = {
+    // Lấy và remove danh sách process từ ProcessStore
+    let child_arcs = {
         let mut procs = processes.lock().unwrap();
-        procs.remove(&process_id)
+        procs.remove(&process_id).unwrap_or_default()
     };
     
-    // Kill process đang chạy
-    if let Some(mut child) = child_opt {
-        if let Err(_e) = child.kill().await {
-            // Ignore kill errors
+    // Kill tất cả process đang chạy cho ID này
+    for child_arc in child_arcs {
+        let mut child_lock = child_arc.lock().await;
+        if let Some(mut child) = child_lock.take() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
         }
-        
-        // Đợi process kết thúc để giải phóng tài nguyên
-        let _ = child.wait().await;
     }
     
-    // Remove output_folder và output_file từ HashMap
+    // Remove output_folder và output_file từ HashMap (nếu có dùng ở chỗ khác)
     {
         let mut folders = IMAGE_VIDEO_OUTPUT_FOLDERS.lock().unwrap();
         folders.remove(&process_id);
@@ -510,7 +619,7 @@ pub async fn stop_image_video_creation(
         files.remove(&process_id);
     }
     
-    Ok("Đã dừng quá trình tạo video".to_string())
+    Ok("Đã dừng toàn bộ tiến trình tạo video".to_string())
 }
 
 // ============================================================================
@@ -540,8 +649,10 @@ fn create_concat_list_file(files: &[String], work_dir: &PathBuf) -> Result<PathB
  * Concat video segments không có hiệu ứng bằng concat demuxer (nhanh hơn nhiều)
  */
 async fn concat_without_effects_fast(
-    segment_files: Vec<String>,
+    segment_files: Vec<String>, 
     output_path: &str,
+    process_id: &str,
+    processes: &tauri::State<'_, ProcessStore>,
 ) -> Result<(), String> {
     if segment_files.is_empty() {
         return Err("Cần ít nhất một video segment".to_string());
@@ -576,9 +687,8 @@ async fn concat_without_effects_fast(
         .arg("-y")
         .arg(output_path);
     
-    // Chạy và đợi process hoàn thành
-    let output = cmd.output().await
-        .map_err(|e| format!("Lỗi khi chạy ffmpeg concat: {}", e))?;
+    // Chạy và đợi với khả năng stop
+    let output = run_ffmpeg_with_cancellation(cmd, process_id, processes).await?;
     
     // Cleanup file concat list
     let _ = fs::remove_file(&concat_list_file);
@@ -601,6 +711,8 @@ async fn concat_video_segments_with_transitions_helper(
     transition_duration: f64,
     output_path: &str,
     _force_scale: bool,
+    process_id: &str,
+    processes: &tauri::State<'_, ProcessStore>,
 ) -> Result<(), String> {
     if segment_files.is_empty() {
         return Err("Cần ít nhất một video segment".to_string());
@@ -613,7 +725,7 @@ async fn concat_video_segments_with_transitions_helper(
     
     // Nếu không có hiệu ứng, dùng concat demuxer với file list để nhanh hơn nhiều
     if video_effect_type == "none" {
-        return concat_without_effects_fast(segment_files, output_path).await;
+        return concat_without_effects_fast(segment_files, output_path, process_id, processes).await;
     }
     
     // Có hiệu ứng: sử dụng SINGLE-PASS TRANSITION (Tối ưu nhất cho ảnh)
@@ -640,7 +752,10 @@ async fn concat_video_segments_with_transitions_helper(
     let final_label = last_output_label;
 
     let mut cmd = run_ffmpeg()?;
-    let encoder = get_best_encoder();
+    let mut encoder = get_best_encoder();
+    if encoder == "h264_videotoolbox" {
+        encoder = "hevc_videotoolbox"; // Force HEVC for Images
+    }
     
     for segment in &segment_files {
         cmd.arg("-i").arg(segment);
@@ -653,16 +768,18 @@ async fn concat_video_segments_with_transitions_helper(
 
     if encoder == "libx264" {
         cmd.arg("-crf").arg("20").arg("-preset").arg("medium");
-    } else if encoder == "h264_videotoolbox" {
-        // Lấy bitrate từ resolution logic
-        let bitrate = match video_quality {
-            "hd" => "8M",
-            "fullhd" => "15M",
-            "2K" => "30M",
-            "4K" => "50M",
-            _ => "15M",
-        };
-        cmd.arg("-b:v").arg(bitrate).arg("-profile:v").arg("high");
+    } else if encoder == "hevc_videotoolbox" {
+        // UPGRADE: Ép dùng HEVC cho output cuối cùng
+        
+        // Cấu hình Quality-Based (Nét 100%) + Fix Màu
+        cmd.arg("-q:v").arg("65")
+           .arg("-tag:v").arg("hvc1")
+           .arg("-realtime").arg("0")
+           .arg("-profile:v").arg("main")
+           .arg("-color_primaries").arg("1")
+           .arg("-color_trc").arg("1")
+           .arg("-colorspace").arg("1");
+           
     } else if encoder.contains("nvenc") {
         cmd.arg("-cq").arg("20");
     }
@@ -670,7 +787,7 @@ async fn concat_video_segments_with_transitions_helper(
     cmd.arg("-pix_fmt").arg("yuv420p")
        .arg("-y").arg(output_path);
 
-    let output = cmd.output().await.map_err(|e| format!("FFmpeg single-pass image error: {}", e))?;
+    let output = run_ffmpeg_with_cancellation(cmd, process_id, processes).await?;
     if !output.status.success() {
         return Err(format!("FFmpeg image transition failing: {}", String::from_utf8_lossy(&output.stderr)));
     }
@@ -686,6 +803,8 @@ async fn concat_video_segments_with_transitions_helper(
 async fn merge_audio_files(
     audio_files: Vec<String>,
     output_audio_path: &str,
+    process_id: &str,
+    processes: &tauri::State<'_, ProcessStore>,
 ) -> Result<(), String> {
     if audio_files.is_empty() {
         return Err("Cần ít nhất một file audio".to_string());
@@ -718,9 +837,8 @@ async fn merge_audio_files(
         .arg("-y")
         .arg(output_audio_path);
     
-    // Chạy và đợi process hoàn thành
-    let output = cmd.output().await
-        .map_err(|e| format!("Lỗi khi merge audio: {}", e))?;
+    // Chạy với khả năng stop
+    let output = run_ffmpeg_with_cancellation(cmd, process_id, processes).await?;
     
     // Cleanup file concat list
     let _ = fs::remove_file(&audio_concat_list_file);
@@ -744,11 +862,87 @@ async fn merge_video_with_audio(
     has_caption: bool,
 ) -> Result<(), String> {
     if has_caption {
-        // Merge video với audio và caption
+        // Merge video with audio and caption
         merge_audio_with_caption(video_path, audio_path, output_path).await
     } else {
-        // Chỉ merge video với audio
+        // Just merge video with audio
         merge_audio_without_caption(video_path, audio_path, output_path).await
     }
+}
+
+/// Tải ảnh từ URL AI và biến nó thành một đoạn Video cinematic
+#[tauri::command]
+pub async fn create_video_from_ai_image(
+    image_url: String,
+    effect: String,
+    duration: i32,
+    processes: tauri::State<'_, ProcessStore>,
+) -> Result<String, String> {
+    println!("Bắt đầu tạo Video AI từ ảnh: {}", image_url);
+    
+    let ffmpeg_path = find_ffmpeg_or_error()?;
+    
+    // 1. Tạo thư mục tạm để làm việc
+    let temp_dir = std::env::temp_dir().join(format!("ai_video_{}", Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("Lỗi tạo folder tạm: {}", e))?;
+    
+    let image_path = temp_dir.join("source_image.png");
+    let video_path = temp_dir.join("result_video.mp4");
+
+    // 2. Tải ảnh từ AI URL
+    let client = reqwest::Client::new();
+    let response = client.get(&image_url).send().await
+        .map_err(|e| format!("Lỗi khi kết nối tới AI Image server: {}", e))?;
+    
+    let bytes = response.bytes().await
+        .map_err(|e| format!("Lỗi khi đọc dữ liệu ảnh: {}", e))?;
+    
+    fs::write(&image_path, bytes).map_err(|e| format!("Lỗi lưu ảnh tạm: {}", e))?;
+
+    // 3. Xử lý kĩ thuật FFmpeg để tạo Video Cinematic
+    let total_frames = duration * 25;
+    let width = 1280;
+    let height = 720;
+    let video_quality = "fullhd";
+    
+    let filter = build_image_filter_string(
+        &effect,
+        width,
+        height,
+        total_frames,
+        0,
+        video_quality
+    );
+
+    let mut cmd = tokio::process::Command::new(ffmpeg_path);
+    cmd.arg("-loop").arg("1")
+       .arg("-framerate").arg("25")
+       .arg("-i").arg(image_path.to_str().unwrap())
+       .arg("-vf").arg(filter)
+       .arg("-t").arg(duration.to_string())
+       .arg("-r").arg("25")
+       .arg("-pix_fmt").arg("yuv420p");
+
+    let encoder = get_best_encoder();
+    cmd.arg("-c:v").arg(&encoder);
+    
+    if encoder == "h264_videotoolbox" {
+        cmd.arg("-q:v").arg("60").arg("-tag:v").arg("hvc1");
+    } else {
+        cmd.arg("-crf").arg("20").arg("-preset").arg("medium");
+    }
+
+    cmd.arg("-y").arg(video_path.to_str().unwrap());
+
+    // 4. Chạy FFmpeg và đợi
+    let process_id = format!("ai_v_{}", Uuid::new_v4());
+    let output = run_ffmpeg_with_cancellation(cmd, &process_id, &processes).await?;
+    
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFmpeg Error: {}", err));
+    }
+
+    Ok(video_path.to_string_lossy().to_string())
 }
 

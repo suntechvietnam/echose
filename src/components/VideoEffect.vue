@@ -111,13 +111,35 @@ const handleImageError = (event) => {
   margin-top: 15px;
 }
 
-/* Effect preview grid */
+/* Effect preview grid - Giới hạn 3 hàng, scroll nếu nhiều hơn */
 .effect-preview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
   gap: 12px;
   margin-top: 12px;
   padding-top: 5px;
+  max-height: 300px; /* ~3 rows (80px + gap) */
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Custom scrollbar */
+.effect-preview-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.effect-preview-grid::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 3px;
+}
+
+.effect-preview-grid::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.5);
+  border-radius: 3px;
+}
+
+.effect-preview-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.7);
 }
 
 .effect-preview-item {

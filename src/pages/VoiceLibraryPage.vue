@@ -5,6 +5,11 @@
         <h1 class="page-title">AI Voice Library</h1>
         <p class="page-subtitle">Thư viện giọng nói đa quốc gia: Việt, Anh, Hàn, Nhật, Trung</p>
       </div>
+      <div class="header-right">
+        <button class="btn-premium-action" @click="showCloningModal = true">
+          <span>✨ Clone Your Voice</span>
+        </button>
+      </div>
     </div>
 
     <!-- Language & Provider Selector -->
@@ -25,6 +30,7 @@
         <select v-model="currentProvider" class="premium-select">
           <option value="edge">🌐 Microsoft (Free)</option>
           <option value="openai">🔥 OpenAI (Premium)</option>
+          <option value="metavoice">💎 MetaVoice (Cinematic)</option>
           <option value="eleven">👑 ElevenLabs (Studio)</option>
         </select>
       </div>
@@ -174,6 +180,46 @@
         </div>
       </div>
     </div>
+
+    <!-- Modal: Clone Voice -->
+    <div v-if="showCloningModal" class="modal-overlay">
+      <div class="modal-content glass-panel animate-zoom-in">
+        <div class="modal-header">
+          <h3>🎙️ Clone giọng nói mới (MetaVoice)</h3>
+          <button class="btn-close-modal" @click="showCloningModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="cloning-step">
+            <label>1. Đặt tên gợi nhớ cho giọng này:</label>
+            <input type="text" v-model="cloningName" placeholder="Ví dụ: Giọng của Kien, Giọng sếp..." class="premium-input-v2" />
+          </div>
+          
+          <div class="cloning-step">
+            <label>2. Tải lên file giọng mẫu (30s - 1 phút):</label>
+            <div class="reference-upload-box" @click="selectReferenceFile">
+              <div v-if="!referencePath" class="upload-placeholder">
+                <span class="up-icon">📁</span>
+                <p>Nén vào đây hoặc Click để chọn file .wav / .mp3</p>
+              </div>
+              <div v-else class="upload-success">
+                <span class="up-icon">✅</span>
+                <p>{{ referenceFileName }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="cloning-info-box">
+            <p>💡 <b>Mẹo:</b> Để kết quả tốt nhất, hãy dùng file âm thanh sạch, không có nhạc nền hoặc tiếng ồn.</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="showCloningModal = false">Hủy</button>
+          <button class="btn-confirm" :disabled="!cloningName || !referencePath" @click="saveClonedVoice">
+            <span>🚀 Lưu vào thư viện</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -200,6 +246,13 @@ const isAIAnalyzing = ref(false)
 const useAIOptimization = ref(true)
 const lastSSML = ref(null)
 
+// Cloning State
+const showCloningModal = ref(false)
+const cloningName = ref('')
+const referencePath = ref('')
+const referenceFileName = ref('')
+const customVoices = ref([]) // Dũng để lưu danh sách giọng đã clone
+
 // Gemini Key
 const GEMINI_KEY = 'AIzaSyDO6Z5xfjjC9jJOtUn0T06OLxeJ_bIEZ1s'
 
@@ -209,15 +262,12 @@ const languages = [
   { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
   { code: 'ko', name: 'Korean', flag: '🇰🇷' },
   { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
+  { code: 'meta', name: 'MetaVoice', flag: '💎' },
 ]
 
 const { isGenerating, generateAudio } = useTTS()
 
 const currentLangName = computed(() => languages.find(l => l.code === currentLang.value)?.name)
-
-const filteredFemaleVoices = computed(() => voicesData[currentLang.value]?.female || [])
-const filteredMaleVoices = computed(() => voicesData[currentLang.value]?.male || [])
-const currentVoiceConfig = computed(() => allVoices.find(v => v.id === selectedVoice.value))
 
 watch(selectedVoice, (newVoiceId) => {
   const config = allVoices.find(v => v.id === newVoiceId)
@@ -385,9 +435,78 @@ const openTempFolder = async () => {
   }
 }
 
+// Cloning Logic
+const selectReferenceFile = async () => {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Audio', extensions: ['mp3', 'wav'] }]
+    })
+    if (selected) {
+      referencePath.value = Array.isArray(selected) ? selected[0] : selected
+      referenceFileName.value = referencePath.value.split('/').pop()
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const saveClonedVoice = () => {
+  const newVoice = {
+    id: `custom-${Date.now()}`,
+    voice: 'metavoice-local',
+    name: cloningName.value,
+    desc: 'Giọng tùy chỉnh (MetaVoice)',
+    icon: '👤',
+    referencePath: referencePath.value,
+    isCustom: true
+  }
+  
+  customVoices.value.push(newVoice)
+  localStorage.setItem('custom_cloned_voices', JSON.stringify(customVoices.value))
+  
+  // Tự động chuyển qua tab meta và chọn giọng mới
+  currentLang.value = 'meta'
+  selectedVoice.value = newVoice.id
+  
+  // Reset modal
+  showCloningModal.value = false
+  cloningName.value = ''
+  referencePath.value = ''
+  referenceFileName.value = ''
+  
+  setStatus('Đã thêm giọng mới vào thư viện!', 'success')
+}
+
+const loadCustomVoices = () => {
+  const saved = localStorage.getItem('custom_cloned_voices')
+  if (saved) {
+    customVoices.value = JSON.parse(saved)
+  }
+}
+
+// Update filtered lists to include custom voices when MetaVoice is selected
+const filteredFemaleVoices = computed(() => {
+  if (currentLang.value === 'meta') {
+    return customVoices.value.filter(v => v.isCustom)
+  }
+  return voicesData[currentLang.value]?.female || []
+})
+
+const filteredMaleVoices = computed(() => {
+  if (currentLang.value === 'meta') return []
+  return voicesData[currentLang.value]?.male || []
+})
+
+const currentVoiceConfig = computed(() => {
+  const all = [...allVoices, ...customVoices.value]
+  return all.find(v => v.id === selectedVoice.value)
+})
+
 onMounted(() => {
   const savedFolder = localStorage.getItem('tts_output_folder')
   if (savedFolder) outputFolder.value = savedFolder
+  loadCustomVoices()
 })
 </script>
 
@@ -532,4 +651,156 @@ input:checked + .slider-glass:before { transform: translateX(16px); }
 
 .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+
+/* Cloning Modal & New UI Styles */
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.btn-premium-action {
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 0.75rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+  transition: all 0.3s;
+}
+
+.btn-premium-action:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  width: 100%;
+  max-width: 500px;
+  padding: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #818cf8;
+}
+
+.btn-close-modal {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.cloning-step {
+  margin-bottom: 1.5rem;
+}
+
+.cloning-step label {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+  color: #94a3b8;
+}
+
+.premium-input-v2 {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid #334155;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  color: white;
+  outline: none;
+}
+
+.reference-upload-box {
+  border: 2px dashed #4f46e5;
+  background: rgba(79, 70, 229, 0.05);
+  border-radius: 1rem;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.reference-upload-box:hover {
+  background: rgba(79, 70, 229, 0.1);
+  border-color: #6366f1;
+}
+
+.up-icon { font-size: 2rem; margin-bottom: 1rem; display: block; }
+
+.cloning-info-box {
+  background: rgba(59, 130, 246, 0.05);
+  padding: 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.btn-cancel {
+  flex: 1;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: white;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+
+.btn-confirm {
+  flex: 2;
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.animate-zoom-in {
+  animation: zoomIn 0.3s ease-out;
+}
+
+@keyframes zoomIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
 </style>
