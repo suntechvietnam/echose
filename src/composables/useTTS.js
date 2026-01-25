@@ -25,6 +25,30 @@ export function useTTS() {
 
         isGenerating.value = true
         try {
+            // Nếu là giọng nhân bản (Custom)
+            if (voiceConfig.isCustom) {
+                console.log('🎙️ Using custom cloned voice:', voiceConfig.name);
+
+                // Chuẩn bị đường dẫn đầu ra
+                const filename = `cloned_${Date.now()}.wav`;
+                const finalOutputPath = outputFolder
+                    ? `${outputFolder}/${filename}`
+                    : `/tmp/${filename}`;
+
+                const filePath = await invoke('clone_voice_metavoice', {
+                    text,
+                    referenceAudioPath: voiceConfig.paths ? voiceConfig.paths.join(',') : voiceConfig.referencePath,
+                    outputPath: finalOutputPath,
+                    lang: options.lang || voiceConfig.lang || 'en',
+                    speed: options.readingSpeed || 0.9
+                });
+
+                lastGeneratedPath.value = filePath;
+                lastAudioUrl.value = convertFileSrc(filePath);
+                return { filePath, audioUrl: lastAudioUrl.value };
+            }
+
+            // Nếu là giọng chuẩn (Edge, OpenAI)
             const pitchStr = pitch >= 0 ? `+${pitch}Hz` : `${pitch}Hz`
             const rateStr = rate >= 0 ? `+${rate}%` : `${rate}%`
             const volumeStr = volume >= 0 ? `+${volume}%` : `${volume}%`
@@ -45,8 +69,6 @@ export function useTTS() {
 
             lastGeneratedPath.value = filePath
             lastAudioUrl.value = filePath.startsWith('http') ? filePath : convertFileSrc(filePath)
-            console.log('✅ Generated TTS file:', filePath)
-            console.log('🔗 Asset URL:', lastAudioUrl.value)
             return { filePath, audioUrl: lastAudioUrl.value }
         } catch (err) {
             console.error('useTTS Error:', err)

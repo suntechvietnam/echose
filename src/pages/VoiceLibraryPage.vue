@@ -29,9 +29,7 @@
       <div class="provider-selector">
         <select v-model="currentProvider" class="premium-select">
           <option value="edge">🌐 Microsoft (Free)</option>
-          <option value="openai">🔥 OpenAI (Premium)</option>
-          <option value="metavoice">💎 MetaVoice (Cinematic)</option>
-          <option value="eleven">👑 ElevenLabs (Studio)</option>
+          <option value="local">🔮 Nhân bản (Local)</option>
         </select>
       </div>
     </div>
@@ -130,14 +128,6 @@
                <div class="slider-label">Âm lượng: <span>{{ volume }}%</span></div>
                <input type="range" v-model="volume" min="-50" max="50" step="5" />
              </div>
-             <div class="slider-item">
-               <div class="slider-label">Bass (Trầm): <span>{{ bass }}dB</span></div>
-               <input type="range" v-model="bass" min="-10" max="20" step="1" />
-             </div>
-             <div class="slider-item">
-               <div class="slider-label">Treble (Cao): <span>{{ treble }}dB</span></div>
-               <input type="range" v-model="treble" min="-10" max="20" step="1" />
-             </div>
           </div>
 
           <!-- API Key Section (Only if premium) -->
@@ -185,7 +175,7 @@
     <div v-if="showCloningModal" class="modal-overlay">
       <div class="modal-content glass-panel animate-zoom-in">
         <div class="modal-header">
-          <h3>🎙️ Clone giọng nói mới (MetaVoice)</h3>
+          <h3>🎙️ Nhân bản giọng nói mới (Local XTTS)</h3>
           <button class="btn-close-modal" @click="showCloningModal = false">✕</button>
         </div>
         <div class="modal-body">
@@ -261,8 +251,6 @@ const languages = [
   { code: 'en', name: 'English', flag: '🇺🇸' },
   { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
   { code: 'ko', name: 'Korean', flag: '🇰🇷' },
-  { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-  { code: 'meta', name: 'MetaVoice', flag: '💎' },
 ]
 
 const { isGenerating, generateAudio } = useTTS()
@@ -456,7 +444,7 @@ const saveClonedVoice = () => {
     id: `custom-${Date.now()}`,
     voice: 'metavoice-local',
     name: cloningName.value,
-    desc: 'Giọng tùy chỉnh (MetaVoice)',
+    desc: 'Giọng nhân bản (Local)',
     icon: '👤',
     referencePath: referencePath.value,
     isCustom: true
@@ -465,8 +453,8 @@ const saveClonedVoice = () => {
   customVoices.value.push(newVoice)
   localStorage.setItem('custom_cloned_voices', JSON.stringify(customVoices.value))
   
-  // Tự động chuyển qua tab meta và chọn giọng mới
-  currentLang.value = 'meta'
+  // Tự động chuyển qua tab thư viện và chọn giọng mới
+  currentLang.value = 'custom'
   selectedVoice.value = newVoice.id
   
   // Reset modal
@@ -487,14 +475,14 @@ const loadCustomVoices = () => {
 
 // Update filtered lists to include custom voices when MetaVoice is selected
 const filteredFemaleVoices = computed(() => {
-  if (currentLang.value === 'meta') {
-    return customVoices.value.filter(v => v.isCustom)
+  if (currentLang.value === 'custom') {
+    return customVoices.value
   }
   return voicesData[currentLang.value]?.female || []
 })
 
 const filteredMaleVoices = computed(() => {
-  if (currentLang.value === 'meta') return []
+  if (currentLang.value === 'custom') return []
   return voicesData[currentLang.value]?.male || []
 })
 

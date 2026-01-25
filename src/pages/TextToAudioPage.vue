@@ -18,7 +18,7 @@
           ></textarea>
           <div class="input-footer">
             <span>{{ text.length }} ký tự</span>
-            <span>Mẹo: Bạn có thể dùng Gemin AI để tối ưu nội dung</span>
+            <span>Mẹo: Bạn có thể dùng Gemini AI để tối ưu nội dung</span>
           </div>
         </div>
 
@@ -52,14 +52,8 @@
             <label class="control-label">Nhà cung cấp</label>
             <select v-model="provider" class="form-select">
               <option value="edge">Microsoft Edge (Miễn phí)</option>
-              <option value="openai">OpenAI (Cần API Key)</option>
-              <option value="metavoice">MetaVoice (Chất lượng cao)</option>
+              <option value="local">Nhân bản (Local)</option>
             </select>
-          </div>
-
-          <div class="control-group" v-if="provider === 'openai'">
-            <label class="control-label">OpenAI API Key</label>
-            <input type="password" v-model="apiKey" class="form-input" placeholder="sk-..." />
           </div>
 
           <div class="control-group">
@@ -88,11 +82,6 @@
           <div class="control-group">
             <label class="control-label">Độ trầm (Pitch): <span>{{ pitch }}Hz</span></label>
             <input type="range" v-model="pitch" min="-100" max="100" step="10" />
-          </div>
-
-          <div class="control-group">
-            <label class="control-label">Bass: <span>{{ bass }}dB</span></label>
-            <input type="range" v-model="bass" min="-10" max="20" step="1" />
           </div>
 
           <div class="control-group">
@@ -129,21 +118,24 @@ import '@/assets/css/text-to-audio.css'
 
 const text = ref('Chào mừng bạn đến với Echose. Hãy nhập nội dung để chuyển thành giọng nói.')
 const selectedLang = ref('vi')
-const selectedVoice = ref('vi-vn-f-22') // Mặc định Ngọc Diệp
+const selectedVoice = ref('vi-vn-f-default')
 const provider = ref('edge')
 const apiKey = ref('')
 const outputFolder = ref('')
 const rate = ref(0)
 const pitch = ref(0)
-const bass = ref(0)
-const treble = ref(0)
 const audioUrl = ref(null)
 const isGenerated = ref(false)
+const customVoices = ref([])
 
 const { isGenerating, generateAudio } = useTTS()
 
 // Lấy danh sách giọng dựa trên ngôn ngữ
 const currentVoices = computed(() => {
+  if (provider.value === 'local') {
+    // Chỉ lấy giọng clone đúng ngôn ngữ đang chọn
+    return customVoices.value.filter(v => (v.lang || 'vi') === selectedLang.value)
+  }
   const langData = VOICES_DATA[selectedLang.value]
   if (!langData) return []
   return [...langData.female, ...langData.male]
@@ -164,8 +156,6 @@ watch(selectedVoice, (newVoiceId) => {
   if (config) {
     pitch.value = config.pitch ?? 0
     rate.value = config.rate ?? 0
-    bass.value = config.bass ?? 0
-    treble.value = config.treble ?? 0
   }
 })
 
@@ -178,14 +168,15 @@ const selectOutputFolder = async () => {
 }
 
 const handlePreview = async () => {
-  const voiceConfig = ALL_VOICES.find(v => v.id === selectedVoice.value)
+  const voiceConfig = provider.value === 'local' 
+    ? customVoices.value.find(v => v.id === selectedVoice.value)
+    : ALL_VOICES.find(v => v.id === selectedVoice.value)
+  
   try {
     const result = await generateAudio(text.value, voiceConfig, {
       pitch: pitch.value,
       rate: rate.value,
       volume: 0,
-      bass: bass.value,
-      treble: treble.value,
       provider: provider.value,
       apiKey: apiKey.value,
       outputFolder: null // Preview thì lưu vào temp
@@ -203,14 +194,15 @@ const handleSave = async () => {
     alert('Vui lòng chọn thư mục lưu trước')
     return
   }
-  const voiceConfig = ALL_VOICES.find(v => v.id === selectedVoice.value)
+  const voiceConfig = provider.value === 'local' 
+    ? customVoices.value.find(v => v.id === selectedVoice.value)
+    : ALL_VOICES.find(v => v.id === selectedVoice.value)
+
   try {
     const result = await generateAudio(text.value, voiceConfig, {
       pitch: pitch.value,
       rate: rate.value,
       volume: 0,
-      bass: bass.value,
-      treble: treble.value,
       provider: provider.value,
       apiKey: apiKey.value,
       outputFolder: outputFolder.value
@@ -233,6 +225,9 @@ const openOutputFolder = () => {
 onMounted(() => {
   const savedFolder = localStorage.getItem('tts_output_folder')
   if (savedFolder) outputFolder.value = savedFolder
+  
+  const savedCustom = localStorage.getItem('custom_cloned_voices_v3')
+  if (savedCustom) customVoices.value = JSON.parse(savedCustom)
 })
 </script>
 

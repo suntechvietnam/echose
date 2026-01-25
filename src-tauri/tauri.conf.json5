@@ -51,6 +51,8 @@
       // signingIdentity: null,
       // Provisioning profile (nếu cần)
       // provisioningProfile: null,
+      // Entitlements
+      entitlements: "Entitlements.plist",
       // Minimum macOS version
       minimumSystemVersion: "10.15",
       // Exception domains cho hardened runtime

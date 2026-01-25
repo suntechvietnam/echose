@@ -1,0 +1,6 @@
+python_libs/
+**/__pycache__/
+**/venv/
+*.wav
+*.mp3
+*.log

@@ -11,7 +11,9 @@ mod utils;
 mod video_to_video;
 mod video_to_image;
 mod tts;
+mod tts_metavoice;
 mod download;
+mod audio_utils;
 
 use process::ProcessStore;
 use std::sync::{Arc, Mutex};
@@ -63,9 +65,15 @@ pub fn main() {
             audio_to_text_txt::segments_to_txt_string,
             // AI Voice (TTS)
             tts::generate_tts,
+            // Voice Cloning (MetaVoice)
+            tts_metavoice::clone_voice_metavoice,
+            tts_metavoice::save_temp_audio,
             // Download
             download::download_video,
-            download::stop_download // Đăng ký command dừng download
+            download::stop_download, // Đăng ký command dừng download
+            // Audio Utils
+            audio_utils::merge_audio_files,
+            audio_utils::copy_external_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

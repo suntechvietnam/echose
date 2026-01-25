@@ -115,6 +115,28 @@
                 <span class="menu-text">Convert Text to Audio</span>
               </a>
             </li>
+            <li>
+              <a 
+                href="#" 
+                class="menu-item submenu-item" 
+                :class="{ active: currentPage === 'dialogue-studio' }"
+                @click.prevent="handleClick('dialogue-studio')"
+              >
+                <span class="menu-icon">🎭</span>
+                <span class="menu-text">AI Dialogue Studio</span>
+              </a>
+            </li>
+            <li>
+              <a 
+                href="#" 
+                class="menu-item submenu-item" 
+                :class="{ active: currentPage === 'voice-cloning' }"
+                @click.prevent="handleClick('voice-cloning')"
+              >
+                <span class="menu-icon">🧬</span>
+                <span class="menu-text">Voice Cloning (Pro)</span>
+              </a>
+            </li>
           </ul>
         </li>
 

@@ -8,11 +8,13 @@
       <ExtractImageFromVideoPage v-if="currentPage === 'extract-image-from-video'" />
       <VoiceLibraryPage v-if="currentPage === 'voice-library'" />
       <TextToAudioPage v-if="currentPage === 'text-to-audio'" />
+      <DialogueStudioPage v-if="currentPage === 'dialogue-studio'" />
       <VideoAudioMergePage v-if="currentPage === 'video-audio-merge'" />
       <ExtractAudioPage v-if="currentPage === 'extract-audio'" />
       
       <AIImagePage v-if="currentPage === 'ai-image'" />
       <AIVideoPage v-if="currentPage === 'ai-video'" />
+      <VoiceCloningPage v-if="currentPage === 'voice-cloning'" @navigate="handleNavigate" />
       
       <!-- Download Tools -->
       <DownloadYoutubePage v-if="currentPage === 'download-youtube'" />
@@ -37,10 +39,12 @@ import AudioToTextPage from './pages/AudioToTextPage.vue'
 import ExtractImageFromVideoPage from './pages/ExtractImageFromVideoPage.vue'
 import VoiceLibraryPage from './pages/VoiceLibraryPage.vue'
 import TextToAudioPage from './pages/TextToAudioPage.vue'
+import DialogueStudioPage from './pages/DialogueStudioPage.vue'
 import VideoAudioMergePage from './pages/VideoAudioMergePage.vue'
 import ExtractAudioPage from './pages/ExtractAudioPage.vue'
 import AIImagePage from './pages/AIImagePage.vue'
 import AIVideoPage from './pages/AIVideoPage.vue'
+import VoiceCloningPage from './pages/VoiceCloningPage.vue'
 import ReupYoutubePage from './pages/ReupYoutubePage.vue'
 import ReupTiktokPage from './pages/ReupTiktokPage.vue'
 import DownloadYoutubePage from './pages/DownloadYoutubePage.vue'

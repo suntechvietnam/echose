@@ -17,8 +17,8 @@ logs/
 .Trashes
 */*.DS_Store
 # Rust/Tauri build artifacts
-frontend/src-tauri/target/
-node_modules
+src-tauri/target/
+node_modules/
 src-tauri/Cargo.lock
 # IDE - VSCode
 .vscode/*
@@ -43,4 +43,8 @@ dist/*
 *.cache
 src-tauri/target/debug/*
 src-tauri/target/*
-src-tauri/models/ggml-base.bin
+src-tauri/models/
+src-tauri/python_libs/
+src/config/gemini.js
+*.wav
+*.mp3

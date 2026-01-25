@@ -25,10 +25,13 @@ serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = ["stream", "json"] }
 dirs = "5.0"
+chrono = "0.4"
 rand = "0.8"
 lazy_static = "1.4"
 uuid = { version = "1.0", features = ["v4"] }
 futures = "0.3"
+ureq = { version = "2.9", features = ["json"] }
+once_cell = "1.19"
 # Speech-to-text với whisper-rs (bindings cho whisper.cpp)
 num_cpus = "1.0"
 whisper-rs = "0.15.1"
