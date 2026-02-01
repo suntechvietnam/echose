@@ -117,8 +117,8 @@ import { useTTS } from '@/composables/useTTS'
 import '@/assets/css/text-to-audio.css'
 
 const text = ref('Chào mừng bạn đến với Echose. Hãy nhập nội dung để chuyển thành giọng nói.')
-const selectedLang = ref('vi')
-const selectedVoice = ref('vi-vn-f-default')
+const selectedLang = ref('ja')
+const selectedVoice = ref('ja-jp-f-default')
 const provider = ref('edge')
 const apiKey = ref('')
 const outputFolder = ref('')

@@ -14,6 +14,8 @@ mod tts;
 mod tts_metavoice;
 mod download;
 mod audio_utils;
+mod furigana_generator;  // Furigana (Ruby text) generator using MeCab
+mod japanese_translator;  // Japanese to Vietnamese translation using Gemini
 
 use process::ProcessStore;
 use std::sync::{Arc, Mutex};
@@ -60,6 +62,7 @@ pub fn main() {
             audio_to_text_ass::save_ass_file,
             audio_to_text_ass::read_ass_file,
             audio_to_text_ass::delete_temp_ass_file,
+            audio_to_text_ass::export_dialogue_ass,
             // Audio to text (whisper-rs) - TXT format
             audio_to_text_txt::convert_audio_to_txt,
             audio_to_text_txt::segments_to_txt_string,

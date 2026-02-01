@@ -1,7 +1,7 @@
 export const LANGUAGES = [
+    { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
     { code: 'vi', name: 'Tiếng Việt', flag: '🇻🇳' },
     { code: 'en', name: 'English', flag: '🇺🇸' },
-    { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
     { code: 'ko', name: 'Korean', flag: '🇰🇷' },
 ];
 

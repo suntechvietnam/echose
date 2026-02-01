@@ -5,11 +5,20 @@ use anyhow::Result;
 use crate::utils::find_ffmpeg_by_os::run_ffmpeg_sync;
 
 /// Segment chứa thông tin timestamp và text từ Whisper
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FuriganaToken {
+    pub t: String,
+    pub r: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TranscriptSegment {
     pub start: f64,  // seconds
     pub end: f64,    // seconds
     pub text: String,
+    pub furigana: Option<String>,    // Optional ASS Ruby format
+    pub tokens: Option<Vec<FuriganaToken>>, // For precise token alignment
+    pub translation: Option<String>, // Optional Vietnamese translation
 }
 
 /// Vị trí caption trên video
@@ -104,9 +113,9 @@ pub struct AssColorConfig {
 impl Default for AssColorConfig {
     fn default() -> Self {
         Self {
-            text_color: "FFFFFF".to_string(),   // Trắng
+            text_color: "FFFF00".to_string(),   // Vàng (giống ảnh bác đưa)
             border_color: "000000".to_string(), // Đen
-            highlight_color: "FFFF00".to_string(), // Vàng
+            highlight_color: "FFFFFF".to_string(), // Trắng (Secondary)
         }
     }
 }
@@ -130,7 +139,7 @@ impl Default for AssExportConfig {
             position: CaptionPosition::Center,
             video_format: VideoFormat::Landscape,
             colors: AssColorConfig::default(),
-            enable_karaoke: true,
+            enable_karaoke: false,
             font_name: "Arial".to_string(),
             custom_font_size: None,
         }
@@ -239,6 +248,9 @@ fn split_segment_by_words(segment: &TranscriptSegment, config: &SplitConfig) -> 
             start: current_start,
             end: chunk_end,
             text: chunk_text,
+            furigana: None,
+            tokens: None,
+            translation: None,
         });
         
         current_start = chunk_end;
@@ -484,6 +496,9 @@ pub fn audio_to_ass(
                 start,
                 end,
                 text: text.trim().to_string(),
+                furigana: None,
+                tokens: None,
+                translation: None,
             });
         }
     }
@@ -619,17 +634,145 @@ pub fn segments_to_ass_content(
         let start_time = seconds_to_ass_time(segment.start);
         let end_time = seconds_to_ass_time(segment.end);
         
-        // Tạo text với karaoke effects nếu enabled
-        let formatted_text = if config.enable_karaoke {
-            create_karaoke_text(&segment.text, segment.start, segment.end)
-        } else {
-            escape_ass_text(&segment.text)
-        };
-        
-        let style_name = if config.enable_karaoke { "Karaoke" } else { "Default" };
-        let line = format!("Dialogue: 0,{},{},{},,0,0,0,,{}\n", 
-            start_time, end_time, style_name, formatted_text);
+    // --- XỬ LÝ ATOMIC CHAIN VỚI CENTERED WRAPPING ---
+    // Lấy thông số từ Config
+    let (screen_w, _screen_h) = config.video_format.resolution();
+    let screen_width = screen_w as f64;
+    
+    // Config cho từng chế độ
+    let (max_line_width, base_y, line_height, kanji_char_w, ruby_char_w, ruby_offset_y) = match config.video_format {
+        VideoFormat::Landscape => (
+            1500.0, // Max width cho 1920
+            900.0,  // Y start
+            140.0,  // Line Height
+            65.0,   // Kanji Char Width (Font Size ~60)
+            32.0,   // Ruby Char Width
+            55.0    // Ruby Offset Y
+        ),
+        VideoFormat::Portrait => (
+            900.0,  // Max width
+            1200.0, // Y start
+            100.0,  // Line Height
+            40.0,   // Kanji Char Width
+            20.0,   // Ruby Char Width
+            28.0    // Ruby Offset Y (Siêu sát Kanji)
+        ),
+    };
+
+    // BƯỚC 1: GROUP TOKENS VÀO CÁC DÒNG (Lines)
+    #[derive(Clone)]
+    struct TokenInfo {
+        text: String,
+        reading: Option<String>,
+        width: f64,
+        char_count: usize,
+    }
+    
+    let mut lines: Vec<Vec<TokenInfo>> = Vec::new();
+    let mut current_line: Vec<TokenInfo> = Vec::new();
+    let mut current_line_width = 0.0;
+    
+    // Đếm tổng số ký tự để tính tỷ lệ thời gian karaoke
+    let mut total_chars = 0;
+    if let Some(tokens) = &segment.tokens {
+        for t in tokens { total_chars += t.t.chars().count(); }
+    }
+    if total_chars == 0 { total_chars = 1; }
+
+    let total_duration_ms = (segment.end - segment.start) * 1000.0;
+    let mut _used_duration_ms = 0.0;
+
+    if let Some(tokens) = &segment.tokens {
+        for token in tokens {
+            let char_count = token.t.chars().count();
+            
+            // Width thực tế = Max(Kanji, Ruby) + Padding
+            let kanji_w = char_count as f64 * kanji_char_w;
+            let ruby_w = if let Some(r) = &token.r {
+                r.chars().count() as f64 * ruby_char_w
+            } else { 0.0 };
+            let width = f64::max(kanji_w, ruby_w) + 5.0;
+            
+            if current_line_width + width > max_line_width {
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                    current_line = Vec::new();
+                    current_line_width = 0.0;
+                }
+            }
+            
+            current_line.push(TokenInfo {
+                text: token.t.clone(),
+                reading: token.r.clone(),
+                width,
+                char_count,
+            });
+            current_line_width += width;
+        }
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+    } else {
+        // Fallback plain text...
+        let max_chars = if screen_width > 1500.0 { 25 } else { 16 };
+        let wrapped_text = wrap_text_smart(&segment.text, max_chars);
+        let line = format!("Dialogue: 1,{},{},Default,,0,0,0,,{{\\pos({:.0},1000)}}{}\n", 
+            start_time, end_time, screen_width/2.0, escape_ass_text(&wrapped_text));
         content.push_str(&line);
+    }
+
+    // BƯỚC 2: RENDER TỪNG DÒNG (CENTER ALIGN - TĨNH, KHÔNG KARAOKE)
+    let block_height = (lines.len() as f64) * line_height;
+    let start_draw_y = if screen_width < 1200.0 {
+        base_y - (block_height / 2.0)
+    } else {
+        base_y
+    };
+
+    for (i, line) in lines.iter().enumerate() {
+        let total_w: f64 = line.iter().map(|t| t.width).sum();
+        let mut curr_x = (screen_width - total_w) / 2.0;
+        let y_kanji = start_draw_y + (i as f64 * line_height);
+        let y_ruby = y_kanji - ruby_offset_y; 
+        
+        for token in line {
+            let escaped_text = escape_ass_text(&token.text);
+            let kanji_w = token.char_count as f64 * kanji_char_w;
+            let ruby_pos_x = curr_x + (token.width - 5.0 - (if let Some(r) = &token.reading { r.chars().count() as f64 * ruby_char_w } else { 0.0 })) / 2.0;
+            let kanji_pos_x = curr_x + (token.width - 5.0 - kanji_w) / 2.0;
+
+            // Render Kanji tĩnh bằng \pos
+            let line_kanji = format!("Dialogue: 1,{},{},Kanji,,0,0,0,,{{\\an7\\pos({:.1},{:.1})}}{}\n", 
+                start_time, end_time, kanji_pos_x, y_kanji, escaped_text);
+            content.push_str(&line_kanji);
+            
+            if let Some(reading) = &token.reading {
+                if !reading.is_empty() {
+                    let escaped_r = escape_ass_text(reading);
+                    let line_ruby = format!("Dialogue: 2,{},{},Ruby,,0,0,0,,{{\\an7\\pos({:.1},{:.1})}}{}\n", 
+                        start_time, end_time, ruby_pos_x, y_ruby, escaped_r);
+                    content.push_str(&line_ruby);
+                }
+            }
+            
+            curr_x += token.width;
+        }
+    }
+    
+    // 3. Render DỊCH (Tiếng Việt) - Tĩnh căn giữa
+    if let Some(trans) = &segment.translation {
+        let y_trans = start_draw_y + block_height + 15.0; // Sát Kanji
+        
+        let wrapped_vi = wrap_text_smart(trans, if screen_width > 1500.0 { 40 } else { 22 });
+        let parts: Vec<&str> = wrapped_vi.split("\\N").collect();
+        
+        for (p_idx, part) in parts.iter().enumerate() {
+            let line_vi = format!("Dialogue: 0,{},{},Trans,,0,0,0,,{{\\an8\\pos({:.0},{:.1})}}{}\n", 
+                start_time, end_time, screen_width/2.0, y_trans + (p_idx as f64 * 45.0), escape_ass_text(part));
+            content.push_str(&line_vi);
+        }
+    }
+    
     }
     
     Ok(content)
@@ -651,40 +794,54 @@ pub fn export_segments_to_ass_file(
 
 /// Tạo ASS header với cấu hình tùy chỉnh
 fn generate_ass_header(config: &AssExportConfig) -> Result<String> {
-    // Lấy các thông số từ video format
+    // 1. Lấy các thông số cơ bản
     let (res_x, res_y) = config.video_format.resolution();
-    let font_size = config.custom_font_size
-        .unwrap_or_else(|| config.video_format.font_size());
+    let font_size = config.custom_font_size.unwrap_or_else(|| config.video_format.font_size());
+    let ruby_font_size = font_size / 2;
     let margin_lr = config.video_format.margin_lr();
     let outline = config.video_format.outline();
-    
     let alignment = config.position.to_alignment();
     
-    // MarginV tùy theo vị trí và format
+    // 2. Chuyển đổi màu sắc
+    let ass_text_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.text_color));
+    let ass_border_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.border_color));
+    let ass_highlight_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.highlight_color));
+    
+    // 3. Tính toán MarginV
     let margin_v = match (&config.position, &config.video_format) {
         (CaptionPosition::Top, VideoFormat::Landscape) => 50,
         (CaptionPosition::Top, VideoFormat::Portrait) => 80,
         (CaptionPosition::Center, _) => 10,
-        (CaptionPosition::CenterBottom, VideoFormat::Landscape) => 40,  // Nằm giữa Center(10) và Bottom(80)
-        (CaptionPosition::CenterBottom, VideoFormat::Portrait) => 100,  // Nằm giữa Center(10) và Bottom(150)
+        (CaptionPosition::CenterBottom, VideoFormat::Landscape) => 40,
+        (CaptionPosition::CenterBottom, VideoFormat::Portrait) => 100,
         (CaptionPosition::Bottom, VideoFormat::Landscape) => 80,
         (CaptionPosition::Bottom, VideoFormat::Portrait) => 150,
     };
     
-    // WrapStyle: 0 = smart wrap, 2 = wrap theo margin
     let wrap_style = match config.video_format {
         VideoFormat::Landscape => 0,
         VideoFormat::Portrait => 2,
     };
 
-    // Chuyển đổi hex colors sang ASS format
-    let ass_text_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.text_color));
-    let ass_border_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.border_color));
-    let ass_highlight_color = format!("&H00{}", hex_to_ass_bgr(&config.colors.highlight_color));
+    // 4. Tạo V4+ Styles
+    let mut styles = String::from("[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n");
     
+    styles.push_str(&format!("Style: Default,{},{},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{},1,{},{},{},{},1\n", 
+        config.font_name, font_size, outline, alignment, margin_lr, margin_lr, margin_v));
+    
+    styles.push_str(&format!("Style: Ruby,{},{},{},&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,1,0,{},50,50,10,1\n", 
+        config.font_name, ruby_font_size, ass_text_color, alignment));
+
+    styles.push_str(&format!("Style: Kanji,{},{},{},{},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{},4,{},200,200,80,1\n", 
+        config.font_name, font_size, ass_text_color, ass_highlight_color, outline, alignment));
+
+    styles.push_str(&format!("Style: Trans,{},{},{},{},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{},4,{},200,200,80,1\n", 
+        config.font_name, (font_size as f32 * 0.9) as u32, ass_text_color, ass_highlight_color, outline, alignment));
+
+    // 5. Kết hợp thành Header hoàn chỉnh
     let header = format!(
         r#"[Script Info]
-Title: Caption - Generated by echose
+Title: Dual Subtitle - Generated by echose
 ScriptType: v4.00+
 Collisions: Normal
 PlayResX: {}
@@ -692,58 +849,65 @@ PlayResY: {}
 Language: {}
 WrapStyle: {}
 
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{},{},{},&H000000FF,{},&H80000000,-1,0,0,0,100,100,0,0,1,{},1.5,{},{},{},{},1
-Style: Karaoke,{},{},{},{},{},&H80000000,-1,0,0,0,100,100,0,0,1,{},1.5,{},{},{},{},1
-
+{}
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"#, 
-        res_x, res_y, config.language, wrap_style,
-        config.font_name, font_size, ass_text_color, ass_border_color, outline, alignment, margin_lr, margin_lr, margin_v,
-        config.font_name, font_size, ass_text_color, ass_highlight_color, ass_border_color, outline, alignment, margin_lr, margin_lr, margin_v
+"#,
+        res_x, res_y, config.language, wrap_style, styles
     );
     
     Ok(header)
 }
 
-/// Tạo karaoke text với highlight effect
-fn create_karaoke_text(text: &str, start: f64, end: f64) -> String {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    
-    if words.is_empty() {
-        return escape_ass_text(text);
+/// Escape ký tự đặc biệt trong ASS, trừ những tag đã định dạng
+fn escape_ass_text(text: &str) -> String {
+    // Chỉ escape backslash nếu nó không phải là start của một ASS tag hợp lệ (đơn giản hóa)
+    // Nhưng an toàn nhất là escape tất cả \ thành \\, { thành \{, } thành \}
+    // Lưu ý: \n (newline nguồn) nên thành \N (ASS newline)
+    text
+        .replace('\\', r"\\") // Escape backslash literal
+        .replace('{', r"\{")
+        .replace('}', r"\}")
+        .replace('\n', r" ")   // Thay xuống dòng nguồn bằng space để tránh break flow, wrap_text_smart sẽ lo việc xuống dòng
+        .trim()
+        .to_string()
+}
+
+/// Tự động xuống dòng cho text dài
+fn wrap_text_smart(text: &str, max_chars_per_line: usize) -> String {
+    if text.chars().count() <= max_chars_per_line {
+        return text.to_string();
     }
     
-    let duration = end - start;
-    let word_count = words.len();
+    let mut result = Vec::new();
+    let mut current_line = String::new();
+    let mut char_count = 0;
     
-    // Chia đều thời gian cho mỗi word (tính bằng centiseconds)
-    let duration_per_word_cs = ((duration / word_count as f64) * 100.0) as i64;
-    
-    let mut result = String::new();
-    
-    for (i, word) in words.iter().enumerate() {
-        let escaped_word = escape_ass_text(word);
+    for ch in text.chars() {
+        // Nếu gặp \\N (đã được escape trước đó/hoặc tag), giữ nguyên? 
+        // Ở đây ta assume input là text đã escape nhưng chưa có tag \N
+        current_line.push(ch);
+        char_count += 1;
         
-        if i == 0 {
-            result.push_str(&format!("{{\\kf{}}}{}", duration_per_word_cs, escaped_word));
-        } else {
-            result.push_str(&format!(" {{\\kf{}}}{}", duration_per_word_cs, escaped_word));
+        let should_break = match ch {
+            '。' | '！' | '？' => true,
+            '、' if char_count >= max_chars_per_line / 2 => true,
+            _ if char_count >= max_chars_per_line => true,
+            _ => false,
+        };
+        
+        if should_break {
+            result.push(current_line.trim().to_string());
+            current_line.clear();
+            char_count = 0;
         }
     }
     
-    result
-}
-
-/// Escape ký tự đặc biệt trong ASS
-fn escape_ass_text(text: &str) -> String {
-    text
-        .replace('\\', r"\\")
-        .replace('{', r"\{")
-        .replace('}', r"\}")
-        .replace('\n', r"\N")
+    if !current_line.trim().is_empty() {
+        result.push(current_line.trim().to_string());
+    }
+    
+    result.join(r"\N")
 }
 
 /// Chuyển đổi hex color (RGB) sang ASS format (BGR)
@@ -822,11 +986,23 @@ pub async fn convert_audio_to_ass(
     .map_err(|e| format!("Lỗi khi chuyển đổi: {}", e))
 }
 
+
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub struct AudioSegment {
+    pub text: String,
+    pub furigana: Option<String>,
+    pub tokens: Option<Vec<FuriganaToken>>,
+    pub translation: Option<String>,
+    pub start: f64,
+    pub end: f64,
+}
+
 /// Tauri command: Chuyển segments thành nội dung ASS string (không lưu file)
 /// Hữu ích cho preview hoặc return content trực tiếp
 #[tauri::command]
 pub async fn segments_to_ass_string(
-    segments: Vec<(f64, f64, String)>, // (start, end, text) tuples
+    segments: Vec<AudioSegment>, 
     language: Option<String>,
     position: Option<String>,
     video_format: Option<String>,
@@ -837,11 +1013,15 @@ pub async fn segments_to_ass_string(
     font_size: Option<i32>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        // Convert tuples to TranscriptSegment
-        let transcript_segments: Vec<TranscriptSegment> = segments
-            .into_iter()
-            .map(|(start, end, text)| TranscriptSegment { start, end, text })
-            .collect();
+        // Convert AudioSegment (Frontend) -> TranscriptSegment (Backend)
+        let transcript_segments: Vec<TranscriptSegment> = segments.into_iter().map(|s| TranscriptSegment {
+            start: s.start,
+            end: s.end,
+            text: s.text,
+            furigana: s.furigana,
+            tokens: s.tokens,
+            translation: s.translation,
+        }).collect();
 
         // Tạo cấu hình ASS export
         let ass_config = AssExportConfig::from_options(
@@ -945,3 +1125,515 @@ mod tests {
         assert_eq!(seconds_to_ass_time(3661.25), "1:01:01.25");
     }
 }
+#[cfg(test)]
+mod tests_tiktok_verification {
+    use super::*;
+
+    #[test]
+    fn test_tiktok_portrait_generation() {
+        // 1. Setup Input Data (Simulation)
+        let segment = TranscriptSegment {
+            start: 0.0,
+            end: 5.0,
+            text: "日本語の勉強".to_string(),
+            furigana: None,
+            tokens: Some(vec![
+                FuriganaToken { t: "日".to_string(), r: Some("に".to_string()) },
+                FuriganaToken { t: "本".to_string(), r: Some("ほん".to_string()) },
+                FuriganaToken { t: "語".to_string(), r: Some("ご".to_string()) },
+                FuriganaToken { t: "の".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "勉".to_string(), r: Some("べん".to_string()) },
+                FuriganaToken { t: "強".to_string(), r: Some("きょう".to_string()) },
+            ]),
+            translation: Some("Việc học tiếng Nhật".to_string()),
+        };
+
+        // 2. Setup Config (TikTok / Portrait)
+        let config = AssExportConfig {
+            video_format: VideoFormat::Portrait, // Quan trọng: Mode 9:16
+            position: CaptionPosition::Center,
+            ..Default::default()
+        };
+
+        // 3. Generate ASS
+        let result = segments_to_ass_content(&[segment], &config).unwrap();
+
+        // 4. Verify Output Log logic
+        println!("---------------------------------------------------");
+        println!("TEST OUTPUT FOR TIKTOK 9:16 MODE:");
+        println!("{}", result);
+        println!("---------------------------------------------------");
+
+        // 5. Assertions to prove logic
+        // Check Resolution
+        assert!(result.contains("PlayResX: 1080"));
+        assert!(result.contains("PlayResY: 1920"));
+        
+        // Check Vertical Centering Logic (Base Y for Portrait is 1200)
+        // Formula: start_draw_y = 1200 - (block_height / 2) = 1150
+        // y_kanji = 1150
+        // Let's check if \pos(...,1150) exists
+        // Note: float formatting might be 1150 or 1150.0
+        
+        assert!(result.contains(",1150)") || result.contains(",1150.0)"), "Vertical position 1150 not found in output");
+    }
+}
+
+    #[test]
+    fn test_render_real_video_artifact() {
+        use std::process::Command;
+        use std::path::Path;
+
+        // 1. Data
+        let segment = TranscriptSegment {
+            start: 1.0,
+            end: 4.0,
+            text: "日本語の勉強は楽しいですね".to_string(),
+            furigana: None,
+            tokens: Some(vec![
+                FuriganaToken { t: "日".to_string(), r: Some("に".to_string()) },
+                FuriganaToken { t: "本".to_string(), r: Some("ほん".to_string()) },
+                FuriganaToken { t: "語".to_string(), r: Some("ご".to_string()) },
+                FuriganaToken { t: "の".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "勉".to_string(), r: Some("べん".to_string()) },
+                FuriganaToken { t: "強".to_string(), r: Some("きょう".to_string()) },
+                FuriganaToken { t: "は".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "楽".to_string(), r: Some("たの".to_string()) },
+                FuriganaToken { t: "し".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "い".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "で".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "す".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "ね".to_string(), r: Some("".to_string()) },
+            ]),
+            translation: Some("Học tiếng Nhật thật vui nhỉ".to_string()),
+        };
+
+        let config = AssExportConfig {
+            video_format: VideoFormat::Portrait, 
+            position: CaptionPosition::Center,
+            ..Default::default()
+        };
+
+        // 2. Export .ass
+        let output_ass = "../test_tiktok_render.ass";
+        export_segments_to_ass_file(&[segment], &config, output_ass).unwrap();
+        
+        let abs_ass_path = std::fs::canonicalize(output_ass).unwrap();
+        let abs_ass_str = abs_ass_path.to_string_lossy();
+        // Fix path for ffmpeg filtering (escaping)
+        // On macOS/Linux, single quotes usually work, but we need to be careful with colons in path
+        // Simplified: just use the filename relative to where we run ffmpeg
+        
+        // 3. Render Video using FFmpeg
+        // Generate a 5s black video with subtitles burned in
+        let output_mp4 = "../test_tiktok_result.mp4";
+        
+        // We run ffmpeg from the project root (parent of src-tauri) effectively if we use absolute paths or relative carefully.
+        // Cargo test runs in src-tauri folder usually? No, it depends.
+        // Using "..."
+        
+        println!("Rendering video to: {}", output_mp4);
+        
+        let status = Command::new("ffmpeg")
+            .args(&[
+                "-y",
+                "-f", "lavfi",
+                "-i", "color=c=black:s=1080x1920:r=30", // Vertical black video
+                "-t", "5",
+                "-vf", &format!("subtitles={}", output_ass), 
+                output_mp4
+            ])
+            .status()
+            .expect("Failed to run ffmpeg");
+
+        assert!(status.success());
+    }
+
+    #[test]
+    fn test_render_real_video_complex_ruby() {
+        use std::process::Command;
+        
+        let segment = TranscriptSegment {
+            start: 1.0,
+            end: 4.0,
+            text: "機能の確認".to_string(), // Text with Kanji that has longer reading
+            furigana: None,
+            tokens: Some(vec![
+                FuriganaToken { t: "機".to_string(), r: Some("き".to_string()) },         // k < r: 1c vs 1c (same)
+                FuriganaToken { t: "能".to_string(), r: Some("のう".to_string()) },       // k < r: 1c vs 2c
+                FuriganaToken { t: "の".to_string(), r: Some("".to_string()) },
+                FuriganaToken { t: "確".to_string(), r: Some("かく".to_string()) },       // k < r: 1c vs 2c
+                FuriganaToken { t: "認".to_string(), r: Some("にん".to_string()) },       // k < r: 1c vs 2c
+            ]),
+            translation: Some("Kiểm tra tính năng".to_string()),
+        };
+
+        let config = AssExportConfig {
+            video_format: VideoFormat::Portrait, 
+            position: CaptionPosition::Center,
+            ..Default::default()
+        };
+
+        let output_ass = "../test_complex_ruby.ass";
+        export_segments_to_ass_file(&[segment], &config, output_ass).unwrap();
+        
+        let output_mp4 = "../test_complex_ruby.mp4";
+        println!("Rendering video to: {}", output_mp4);
+        
+        let status = Command::new("ffmpeg")
+            .args(&[
+                "-y",
+                "-f", "lavfi",
+                "-i", "color=c=black:s=1080x1920:r=30",
+                "-t", "5",
+                "-vf", &format!("subtitles={}:force_style='Fontname=Hiragino Sans'", output_ass), 
+                output_mp4
+            ])
+            .status()
+            .expect("Failed to run ffmpeg");
+
+        assert!(status.success());
+    }
+
+    #[test]
+    fn test_full_flow_user_request() {
+        use std::process::Command;
+        
+        // 1. Dữ liệu mẫu cực chuẩn theo request user
+        let segments = vec![
+            TranscriptSegment {
+                start: 0.0, end: 4.0,
+                text: "ねえ、Bさん。最近、日本語の勉強は順調？".to_string(),
+                furigana: None,
+                tokens: Some(vec![
+                    FuriganaToken { t: "ねえ、".to_string(), r: None },
+                    FuriganaToken { t: "B".to_string(), r: None },
+                    FuriganaToken { t: "さん".to_string(), r: None },
+                    FuriganaToken { t: "。".to_string(), r: None },
+                    FuriganaToken { t: "最".to_string(), r: Some("さい".to_string()) },
+                    FuriganaToken { t: "近".to_string(), r: Some("きん".to_string()) },
+                    FuriganaToken { t: "、".to_string(), r: None },
+                    FuriganaToken { t: "日".to_string(), r: Some("に".to_string()) },
+                    FuriganaToken { t: "本".to_string(), r: Some("ほん".to_string()) },
+                    FuriganaToken { t: "語".to_string(), r: Some("ご".to_string()) },
+                    FuriganaToken { t: "の".to_string(), r: Some("".to_string()) },
+                    FuriganaToken { t: "勉".to_string(), r: Some("べん".to_string()) },
+                    FuriganaToken { t: "強".to_string(), r: Some("きょう".to_string()) },
+                    FuriganaToken { t: "は".to_string(), r: None },
+                    FuriganaToken { t: "順".to_string(), r: Some("じゅん".to_string()) },
+                    FuriganaToken { t: "調".to_string(), r: Some("ちょう".to_string()) },
+                    FuriganaToken { t: "？".to_string(), r: None },
+                ]),
+                translation: Some("Này B, dạo này việc học tiếng Nhật tốt không?".to_string()),
+            },
+            TranscriptSegment {
+                start: 4.0, end: 9.0,
+                text: "うーん、まあまあかな。N3の漢字が難しくて、覚えられなくて困っているんだ。".to_string(),
+                furigana: None,
+                tokens: Some(vec![
+                    FuriganaToken { t: "うーん、".to_string(), r: None },
+                    FuriganaToken { t: "まあまあ".to_string(), r: None },
+                    FuriganaToken { t: "かな".to_string(), r: None },
+                    FuriganaToken { t: "。".to_string(), r: None },
+                    FuriganaToken { t: "N".to_string(), r: None },
+                    FuriganaToken { t: "3".to_string(), r: None },
+                    FuriganaToken { t: "の".to_string(), r: None },
+                    FuriganaToken { t: "漢".to_string(), r: Some("かん".to_string()) },
+                    FuriganaToken { t: "字".to_string(), r: Some("じ".to_string()) },
+                    FuriganaToken { t: "が".to_string(), r: None },
+                    FuriganaToken { t: "難".to_string(), r: Some("むずか".to_string()) },
+                    FuriganaToken { t: "し".to_string(), r: None },
+                    FuriganaToken { t: "く".to_string(), r: None },
+                    FuriganaToken { t: "て".to_string(), r: None },
+                    FuriganaToken { t: "、".to_string(), r: None },
+                    FuriganaToken { t: "覚".to_string(), r: Some("おぼ".to_string()) },
+                    FuriganaToken { t: "え".to_string(), r: None },
+                    FuriganaToken { t: "ら".to_string(), r: None },
+                    FuriganaToken { t: "れ".to_string(), r: None },
+                    FuriganaToken { t: "な".to_string(), r: None },
+                    FuriganaToken { t: "く".to_string(), r: None },
+                    FuriganaToken { t: "て".to_string(), r: None },
+                    FuriganaToken { t: "困".to_string(), r: Some("こま".to_string()) },
+                    FuriganaToken { t: "っ".to_string(), r: None },
+                    FuriganaToken { t: "て".to_string(), r: None },
+                    FuriganaToken { t: "い".to_string(), r: None },
+                    FuriganaToken { t: "る".to_string(), r: None },
+                    FuriganaToken { t: "ん".to_string(), r: None },
+                    FuriganaToken { t: "だ".to_string(), r: None },
+                    FuriganaToken { t: "。".to_string(), r: None },
+                ]),
+                translation: Some("Ừm, cũng tàm tạm. Kanji N3 khó quá, không nhớ nổi nên đang rầu đây.".to_string()),
+            }
+        ];
+
+        let config = AssExportConfig {
+            video_format: VideoFormat::Portrait, // Mode TikTok 9:16
+            position: CaptionPosition::Center,
+            ..Default::default()
+        };
+
+        let output_ass = "../user_complain_test.ass";
+        let output_video = "../user_complain_test.mp4";
+
+        println!("Generating ASS to: {}", output_ass);
+        export_segments_to_ass_file(&segments, &config, output_ass).unwrap();
+        
+        println!("Rendering Video to: {}", output_video);
+        let status = Command::new("ffmpeg")
+            .args(&[
+                "-y",
+                "-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=30", // Input 0: Video
+                "-f", "lavfi", "-i", "sine=f=440:b=4",                 // Input 1: Audio (Beep)
+                "-t", "10",
+                "-vf", &format!("subtitles={}:force_style='Fontname=Hiragino Sans'", output_ass),
+                "-map", "0:v", "-map", "1:a", // Map video và audio
+                "-c:v", "libx264", "-c:a", "aac", // Encode chuẩn
+                "-shortest", // Dừng khi stream ngắn nhất kết thúc (thường là -t 10 sẽ handle)
+                output_video
+            ])
+            .status()
+            .expect("Failed to run ffmpeg");
+            
+        assert!(status.success());
+    }
+
+    #[test]
+    fn test_full_flow_with_tts_audio() {
+        use std::process::Command;
+        use std::path::Path;
+        
+        // 1. Tạo file audio TTS tiếng Nhật giả lập (dùng macos 'say' command)
+        let tts_audio = "../test_tts_JP.aiff";
+        let tts_audio_mp3 = "../test_tts_JP.mp3";
+        
+        let output = Command::new("say")
+            .arg("-v").arg("Kyoko") // Giọng Nhật chuẩn trên Mac
+            .arg("-o").arg(tts_audio)
+            .arg("ねえ、Bさん。最近、日本語の勉強は順調？うーん、まあまあかな。")
+            .output();
+            
+        if output.is_ok() && output.as_ref().unwrap().status.success() {
+             // Convert AIFF to MP3 for consistency using ffmpeg
+             let _ = Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-i").arg(tts_audio)
+                .arg(tts_audio_mp3)
+                .status();
+        } else {
+            // Fallback nếu không có 'say' hoặc giọng Kyoko: dùng sine wave
+             let _ = Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-f").arg("lavfi").arg("-i").arg("sine=f=440:b=4")
+                .arg("-t").arg("5")
+                .arg(tts_audio_mp3)
+                .status();
+        }
+
+        // 2. Dữ liệu mẫu (Khớp với nội dung TTS)
+        let segments = vec![
+            TranscriptSegment {
+                start: 0.0, end: 4.0,
+                text: "ねえ、Bさん。最近、日本語の勉強は順調？".to_string(),
+                furigana: None,
+                tokens: Some(vec![
+                    FuriganaToken { t: "ねえ、".to_string(), r: None },
+                    FuriganaToken { t: "B".to_string(), r: None },
+                    FuriganaToken { t: "さん".to_string(), r: None },
+                    FuriganaToken { t: "。".to_string(), r: None },
+                    FuriganaToken { t: "日".to_string(), r: Some("に".to_string()) },
+                    FuriganaToken { t: "本".to_string(), r: Some("ほん".to_string()) },
+                    FuriganaToken { t: "語".to_string(), r: Some("ご".to_string()) },
+                ]),
+                translation: Some("Này B, học hành thế nào?".to_string()),
+            },
+        ];
+
+        let config = AssExportConfig {
+            video_format: VideoFormat::Portrait,
+            position: CaptionPosition::Center,
+            ..Default::default()
+        };
+
+        let output_ass = "../test_tts_video.ass";
+        export_segments_to_ass_file(&segments, &config, output_ass).unwrap();
+        
+        let output_video = "../test_tts_video.mp4";
+        println!("Rendering Video with TTS Audio to: {}", output_video);
+        
+        let status = Command::new("ffmpeg")
+            .args(&[
+                "-y",
+                "-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=30", // Input 0: Video
+                "-i", tts_audio_mp3,                                   // Input 1: Audio (TTS)
+                "-t", "5", // Duration ngắn
+                "-vf", &format!("subtitles={}:force_style='Fontname=Hiragino Sans'", output_ass),
+                "-map", "0:v", "-map", "1:a",
+                "-c:v", "libx264", "-c:a", "aac",
+                "-shortest",
+                output_video
+            ])
+            .status()
+            .expect("Failed to run ffmpeg");
+            
+        assert!(status.success());
+    }
+
+#[tauri::command]
+pub async fn export_dialogue_ass(
+    segments: Vec<serde_json::Value>,
+    output_folder: String,
+    language: String,
+    video_format: String,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+    
+    // Convert JSON segments to TranscriptSegment
+    let mut transcript_segments = Vec::new();
+    
+    for seg in segments {
+        let segment = TranscriptSegment {
+            start: seg["start"].as_f64().unwrap_or(0.0),
+            end: seg["end"].as_f64().unwrap_or(0.0),
+            text: seg["text"].as_str().unwrap_or("").to_string(),
+            furigana: None,
+            tokens: None, // Will be generated if language is Japanese
+            translation: seg["translation"].as_str().map(|s| s.to_string()),
+        };
+        transcript_segments.push(segment);
+    }
+    
+    // Determine video format
+    let vf = if video_format == "portrait" {
+        VideoFormat::Portrait
+    } else {
+        VideoFormat::Landscape
+    };
+    
+    // Create ASS config
+    let config = AssExportConfig {
+        video_format: vf,
+        position: CaptionPosition::Center,
+        ..Default::default()
+    };
+    
+    // Generate output filename
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let output_path = PathBuf::from(&output_folder).join(format!("dialogue_{}.ass", timestamp));
+    let output_path_str = output_path.to_string_lossy().to_string();
+    
+    // Export to ASS
+    export_segments_to_ass_file(&transcript_segments, &config, &output_path_str)
+        .map_err(|e| e.to_string())?;
+    
+    Ok(output_path_str)
+}
+
+    #[test]
+    fn test_final_flow_916_with_provided_text() {
+        use std::process::Command;
+        
+        let tts_audio = "../user_flow_916.mp3";
+        // Giả lập tạo MP3 tiếng Nhật (dùng lavfi beep nếu không có 'say', hoặc dùng sine)
+        // Lưu ý: Trong app thật bác sẽ bấm nút tạo voice. Ở đây em giả lập file audio để test flow.
+        let _ = Command::new("ffmpeg")
+            .args(&["-y", "-f", "lavfi", "-i", "sine=f=440:b=4", "-t", "8", tts_audio])
+            .status();
+
+        // 2. Tạo dữ liệu kịch bản chuẩn
+        let segments = vec![
+            TranscriptSegment {
+                start: 0.0, end: 4.0,
+                text: "ねえ、Bさん。最近、日本語の勉強は順調？".to_string(),
+                furigana: None,
+                tokens: Some(vec![
+                    FuriganaToken { t: "ねえ、".to_string(), r: None },
+                    FuriganaToken { t: "B".to_string(), r: None },
+                    FuriganaToken { t: "さん".to_string(), r: None },
+                    FuriganaToken { t: "。".to_string(), r: None },
+                    FuriganaToken { t: "最".to_string(), r: Some("さい".to_string()) },
+                    FuriganaToken { t: "近".to_string(), r: Some("きん".to_string()) },
+                    FuriganaToken { t: "、".to_string(), r: None },
+                    FuriganaToken { t: "日".to_string(), r: Some("に".to_string()) },
+                    FuriganaToken { t: "本".to_string(), r: Some("ほん".to_string()) },
+                    FuriganaToken { t: "語".to_string(), r: Some("ご".to_string()) },
+                    FuriganaToken { t: "の".to_string(), r: None },
+                    FuriganaToken { t: "勉".to_string(), r: Some("べん".to_string()) },
+                    FuriganaToken { t: "強".to_string(), r: Some("きょう".to_string()) },
+                    FuriganaToken { t: "は".to_string(), r: None },
+                    FuriganaToken { t: "順".to_string(), r: Some("じゅん".to_string()) },
+                    FuriganaToken { t: "調".to_string(), r: Some("ちょう".to_string()) },
+                    FuriganaToken { t: "？".to_string(), r: None },
+                ]),
+                translation: Some("Này B, dạo này việc học tiếng Nhật tốt không?".to_string()),
+            },
+            TranscriptSegment {
+                start: 4.0, end: 8.0,
+                text: "うーん、まあまあかな。N3の漢字が難しくて、覚えられなくて困っているんだ。".to_string(),
+                furigana: None,
+                tokens: Some(vec![
+                    FuriganaToken { t: "うーん、".to_string(), r: None },
+                    FuriganaToken { t: "まあまあ".to_string(), r: None },
+                    FuriganaToken { t: "かな".to_string(), r: None },
+                    FuriganaToken { t: "。".to_string(), r: None },
+                    FuriganaToken { t: "N".to_string(), r: None },
+                    FuriganaToken { t: "3".to_string(), r: None },
+                    FuriganaToken { t: "の".to_string(), r: None },
+                    FuriganaToken { t: "漢".to_string(), r: Some("かん".to_string()) },
+                    FuriganaToken { t: "字".to_string(), r: Some("じ".to_string()) },
+                    FuriganaToken { t: "が".to_string(), r: None },
+                    FuriganaToken { t: "難".to_string(), r: Some("むずか".to_string()) },
+                    FuriganaToken { t: "し".to_string(), r: None },
+                    FuriganaToken { t: "く".to_string(), r: None },
+                    FuriganaToken { t: "て".to_string(), r: None },
+                    FuriganaToken { t: "、".to_string(), r: None },
+                    FuriganaToken { t: "覚".to_string(), r: Some("おぼ".to_string()) },
+                    FuriganaToken { t: "え".to_string(), r: None },
+                    FuriganaToken { t: "ら".to_string(), r: None },
+                    FuriganaToken { t: "れ".to_string(), r: None },
+                    FuriganaToken { t: "な".to_string(), r: None },
+                    FuriganaToken { t: "く".to_string(), r: None },
+                    FuriganaToken { t: "て".to_string(), r: None },
+                    FuriganaToken { t: "困".to_string(), r: Some("こま".to_string()) },
+                    FuriganaToken { t: "っ".to_string(), r: None },
+                    FuriganaToken { t: "て".to_string(), r: None },
+                    FuriganaToken { t: "い".to_string(), r: None },
+                    FuriganaToken { t: "る".to_string(), r: None },
+                    FuriganaToken { t: "ん".to_string(), r: None },
+                    FuriganaToken { t: "だ".to_string(), r: None },
+                    FuriganaToken { t: "。".to_string(), r: None },
+                ]),
+                translation: Some("Ừm, cũng tàm tạm. Kanji N3 khó quá, không nhớ nổi nên đang rầu đây.".to_string()),
+            }
+        ];
+
+        // 3. Export ASS 9:16
+        let config = AssExportConfig {
+            video_format: VideoFormat::Portrait, // 9:16
+            position: CaptionPosition::Center,
+            ..Default::default()
+        };
+        let output_ass = "../user_flow_916.ass";
+        export_segments_to_ass_file(&segments, &config, output_ass).unwrap();
+
+        // 4. Render Video 9:16
+        let output_video = "../user_flow_final_916.mp4";
+        println!("Creating Final Video 9:16: {}", output_video);
+        let status = Command::new("ffmpeg")
+            .args(&[
+                "-y",
+                "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:r=30", // Dummy Video 9:16
+                "-i", tts_audio,
+                "-t", "8",
+                "-vf", &format!("subtitles={}", output_ass),
+                "-map", "0:v", "-map", "1:a",
+                "-c:v", "libx264", "-c:a", "aac",
+                output_video
+            ])
+            .status()
+            .expect("Final render failed");
+            
+        assert!(status.success());
+    }

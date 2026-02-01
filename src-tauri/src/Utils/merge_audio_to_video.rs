@@ -8,6 +8,7 @@ async fn generate_caption_from_audio(
     language: Option<&str>,
     font_name: Option<&str>,
     font_size: Option<i32>,
+    video_format: Option<&str>, // Thêm video_format (landscape/portrait)
 ) -> Result<String, String> {
     // Tạo đường dẫn output cho caption file
     let caption_output_path = format!("{}_caption.ass", 
@@ -20,8 +21,8 @@ async fn generate_caption_from_audio(
         Some(&caption_output_path),
         None, // Sử dụng model mặc định
         language,
-        None, // Vị trí mặc định (center)
-        None, // Video format mặc định (landscape)
+        Some("center"), // Vị trí mặc định (center - đã được handle trong ASS config)
+        video_format, // Video format: "landscape" hoặc "portrait"
         None, // Text color mặc định
         None, // Border color mặc định
         None, // Highlight color mặc định
@@ -88,7 +89,7 @@ pub async fn merge_audio_with_caption(
     output_path: &str,
 ) -> Result<(), String> {
     // Tạo caption từ audio path (mặc định các settings font)
-    let caption_path = generate_caption_from_audio(audio_path, None, None, None).await?;
+    let caption_path = generate_caption_from_audio(audio_path, None, None, None, None).await?;
     
     // Lấy duration của audio file
     let audio_duration = get_audio_duration(audio_path.to_string()).await
@@ -105,7 +106,7 @@ pub async fn merge_audio_with_caption(
         .arg("-t")
         .arg(format!("{:.2}", audio_duration)) // Giới hạn output theo duration của audio
         .arg("-vf")
-        .arg(format!("subtitles='{}'", caption_path.replace('\'', "'\\''"))) // Burn-in subtitle vào video với escape
+        .arg(format!("subtitles=f='{}'", caption_path.replace('\\', "/").replace('\'', "'\\''"))) // Burn-in subtitle với path chuẩn
         .arg("-c:a")
         .arg("aac") // Encode audio thành AAC
         .arg("-b:a")
@@ -215,17 +216,42 @@ pub async fn merge_video_all_in_one(
     );
     
     let mut temp_caption_path = None;
+
+    // Tiền xử lý path để tránh lỗi FFmpeg parser
+    // Escape single quote cho FFmpeg filter
+    let escaped_cap_path = if let Some(ap) = audio_path {
+        // Detect Portrait/Landscape dynamically via Probe
+        let video_fmt = match get_video_resolution(video_path) {
+            Ok((w, h)) => if h > w { "portrait" } else { "landscape" },
+            Err(_) => "landscape", // Fallback
+        };
+        
+        // Log để debug
+        println!("Detected Video Format for Subtitles: {} (based on probe)", video_fmt);
+        
+        let cap_path = generate_caption_from_audio(ap, subtitle_language, subtitle_font_name, Some(subtitle_font_size), Some(video_fmt)).await?;
+        temp_caption_path = Some(cap_path.clone());
+        cap_path.replace('\\', "/").replace('\'', "'\\''")
+    } else { "".to_string() };
+
+    let escaped_sub_path = subtitle_path.map(|p| p.replace('\\', "/").replace('\'', "'\\''")).unwrap_or_default();
+
     if has_auto_caption {
-        if let Some(ap) = audio_path {
-             let cap_path = generate_caption_from_audio(ap, subtitle_language, subtitle_font_name, Some(subtitle_font_size)).await?;
-             filters.push(format!("{}subtitles='{}':force_style='{}'[v_sub]", 
-                current_video_stream, cap_path.replace('\'', "'\\''"), force_style));
-             current_video_stream = "[v_sub]".to_string();
-             temp_caption_path = Some(cap_path);
+        // QUAN TRỌNG: Không dùng force_style cho Auto Caption vì file ASS đã được style chuẩn (Kanji/Ruby/Pos)
+        filters.push(format!("{}subtitles=f='{}'[v_sub]", 
+            current_video_stream, escaped_cap_path));
+        current_video_stream = "[v_sub]".to_string();
+    } else if let Some(sub_path) = subtitle_path {
+        // Kiểm tra extension: Nếu là .ass thì KHÔNG dùng force_style (để giữ nguyên style phức tạp)
+        // Chỉ dùng force_style cho .srt
+        if sub_path.ends_with(".ass") {
+            filters.push(format!("{}subtitles=f='{}'[v_sub]", 
+                current_video_stream, escaped_sub_path));
+        } else {
+            // File .srt hoặc format khác: Dùng force_style
+            filters.push(format!("{}subtitles=f='{}':force_style='{}'[v_sub]", 
+                current_video_stream, escaped_sub_path, force_style));
         }
-    } else if let Some(sp) = subtitle_path {
-        filters.push(format!("{}subtitles='{}':force_style='{}'[v_sub]", 
-            current_video_stream, sp.replace('\'', "'\\''"), force_style));
         current_video_stream = "[v_sub]".to_string();
     }
     
@@ -274,4 +300,31 @@ pub async fn merge_video_all_in_one(
     }
     
     Ok(())
+}
+
+fn get_video_resolution(video_path: &str) -> Result<(i32, i32), String> {
+    use std::process::Command;
+    
+    // ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 input.mp4
+    let output = Command::new("ffprobe")
+        .args(&["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", video_path])
+        .output()
+        .map_err(|e| format!("Lỗi khi chạy ffprobe: {}", e))?;
+        
+    if !output.status.success() {
+        return Err("ffprobe failed".to_string());
+    }
+    
+    let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let parts: Vec<&str> = output_str.split('x').collect();
+    
+    if parts.len() == 2 {
+        let w = parts[0].parse::<i32>().unwrap_or(0);
+        let h = parts[1].parse::<i32>().unwrap_or(0);
+        if w > 0 && h > 0 {
+            return Ok((w, h));
+        }
+    }
+    
+    Err("Không thể parse resolution".to_string())
 }

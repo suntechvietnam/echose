@@ -108,9 +108,18 @@
                    <div class="seg-metrics">
                       <span class="m-item">Speed: <b>{{ seg.speed }}x</b></span>
                       <span class="m-item">Pitch: <b>{{ seg.pitch }}Hz</b></span>
+                      <span class="m-item" v-if="seg.startTime !== undefined" style="color: var(--secondary)">
+                        Time: <b>{{ formatTimeShort(seg.startTime) }} - {{ formatTimeShort(seg.endTime) }}</b>
+                      </span>
                    </div>
                 </div>
                 <p class="seg-text">{{ seg.text }}</p>
+                <div class="tokens-preview" v-if="seg.tokens" style="font-size: 0.8rem; background: rgba(255,255,255,0.05); padding: 6px; border-radius: 4px; margin-bottom: 0.5rem; word-break: break-all;">
+                  <span v-for="(t, i) in seg.tokens" :key="i" style="margin-right: 4px; padding: 2px 4px; border: 1px solid rgba(255,255,255,0.1); border-radius: 3px;">
+                    <b style="color: #fff">{{ t.t }}</b><span v-if="t.r" style="color: var(--secondary)">({{ t.r }})</span>
+                  </span>
+                </div>
+                <div class="seg-translation" v-if="seg.translation" style="font-size: 1rem; color: #fbbf24; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem; margin-top: 0.5rem; font-style: italic;">🇻🇳 Dịch: {{ seg.translation }}</div>
                 <div class="seg-reason" v-if="seg.reason"><b>AI Insight:</b> {{ seg.reason }}</div>
                 <div class="seg-badge" v-if="seg.status" :class="seg.status">{{ seg.statusText }}</div>
              </div>
@@ -143,6 +152,15 @@
               <span v-if="!isProducing">🚀 XUẤT AUDIO HOÀN CHỈNH</span>
               <span v-else>Đang trộn âm thanh... ({{ currentProcessingIdx + 1 }}/{{ analyzedSegments.length }})</span>
             </button>
+
+            <!-- Aspect Ratio Selector (Main influence for the auto-generated ASS) -->
+            <div class="ass-config-row" style="margin-top: 1rem; display: flex; gap: 0.75rem; align-items: center; background: rgba(255,255,255,0.03); padding: 0.75rem; border-radius: 0.75rem; border: 1px solid rgba(255,255,255,0.05);">
+              <label style="color: #94a3b8; font-size: 0.875rem; white-space: nowrap; font-weight: 600;">🎞️ Tỷ lệ Video mục tiêu:</label>
+              <select v-model="selectedAspectRatio" class="minimal-select" style="flex: 1; height: 38px;">
+                <option value="16:9">16:9 (Ngang - Youtube/FB)</option>
+                <option value="9:16">9:16 (Dọc - TikTok/Reels)</option>
+              </select>
+            </div>
           </div>
 
           <!-- FINAL RESULT PLAYER -->
@@ -175,7 +193,7 @@ import { GEMINI_API_KEY } from '@/config/gemini'
  */
 
 const rawScript = ref('')
-const selectedLang = ref('vi')
+const selectedLang = ref('ja')
 const speakerMapping = ref({})
 const isAnalyzing = ref(false)
 const isProducing = ref(false)
@@ -183,8 +201,31 @@ const analyzedSegments = ref([])
 const analysisError = ref(null)
 const currentProcessingIdx = ref(-1)
 const outputFolder = ref('')
+const selectedAspectRatio = ref('16:9')
 const finalAudioUrl = ref(null)
 const geminiKeyInput = ref('')
+
+const exportAssFile = async () => {
+  if (!outputFolder.value || analyzedSegments.value.length === 0) {
+    alert('Vui lòng chọn thư mục và phân tích kịch bản trước!')
+    return
+  }
+
+  try {
+    const videoFormat = selectedAspectRatio.value === '9:16' ? 'portrait' : 'landscape'
+    
+    const result = await invoke('export_dialogue_ass', {
+      segments: analyzedSegments.value,
+      outputFolder: outputFolder.value,
+      language: selectedLang.value,
+      videoFormat: videoFormat
+    })
+    
+    alert(`✅ Đã xuất file ASS (${selectedAspectRatio.value})!\n${result}`)
+  } catch (error) {
+    alert(`❌ Lỗi khi xuất ASS: ${error}`)
+  }
+}
 
 const { generateAudio } = useTTS()
 // API Key mặc định (được đọc từ file cấu hình riêng biệt)
@@ -231,10 +272,31 @@ const analyzeWithGemini = async () => {
     const genAI = new GoogleGenerativeAI(activeKey)
     const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" })
 
-    const prompt = `Bạn là đạo diễn âm thanh chuyên nghiệp. Hãy phân tích hội thoại sau và trả về MẢNG JSON.
-    Nội dung: "${rawScript.value}"
-    Yêu cầu: {"speaker": "tên", "text": "câu nói", "speed": float (0.8-1.2), "pitch": 0, "reason": "lý do"}.
-    Chỉ trả về JSON Array.`
+    const prompt = `Bạn là chuyên gia lồng tiếng và ngữ âm Nhật - Việt. 
+    Nhiệm vụ: Phân tích cảm xúc, ngữ cảnh của từng câu thoại để điều chỉnh tốc độ (speed) và cao độ (pitch) phù hợp, giúp giọng đọc tự nhiên và giống người thật nhất.
+
+    Nội dung kịch bản: "${rawScript.value}"
+    
+    YÊU CẦU OUTPUT:
+    Trả về MẢNG JSON (Array) với các trường sau:
+    1. "speaker": Tên nhân vật
+    2. "text": Giữ nguyên câu thoại gốc
+    3. "tokens": Bóc tách từ để làm phụ đề Kanji/Furigana (Quan trọng):
+       - Với từ có Kanji: {"t": "漢字", "r": "かんじ"}
+       - Với Hiragana/Katakana/Dấu câu: {"t": "ねえ、", "r": ""} (để r trống)
+    4. "translation": Dịch câu thoại sang tiếng Việt tự nhiên.
+    5. "speed": Tốc độ đọc (float, từ 0.7 đến 1.2). 
+       - QUAN TRỌNG: Tốc độ bình thường của con người là 0.9 (KHÔNG PHẢI 1.0)
+       - Buồn/Nghiêm trọng/Chậm rãi: 0.7 - 0.85
+       - Bình thường/Tự nhiên: 0.9
+       - Vui vẻ/Háo hức/Gấp gáp: 1.0 - 1.2
+    6. "pitch": Cao độ (int, từ -10 đến +10 Hz).
+       - Giọng trầm/Nam tính/Buồn: -5 đến -10
+       - Bình thường: 0
+       - Giọng cao/Nữ tính/Vui/Ngạc nhiên: +5 đến +10
+    7. "reason": Giải thích ngắn gọn tại sao chọn speed/pitch đó (VD: "Đang vui vẻ nên nói nhanh hơn").
+
+    Return valid JSON Array only.`
 
     const result = await model.generateContent(prompt)
     const response = await result.response
@@ -300,6 +362,8 @@ const produceDialogue = async () => {
   isProducing.value = true
   finalAudioUrl.value = null
   const tempFiles = []
+  const subSegments = [] // Mảng chứa (start, end, text) để làm Sub
+  let currentTime = 0
   
   try {
     for (let i = 0; i < analyzedSegments.value.length; i++) {
@@ -317,19 +381,67 @@ const produceDialogue = async () => {
             readingSpeed: seg.speed,
             lang: selectedLang.value
         })
+
+        // Lấy thời gian chính xác của đoạn vừa tạo để làm Sub
+        const duration = await invoke('get_audio_duration', { filePath: result.filePath })
+        
+        // Gắn timing vào segment để bác check trên UI luôn
+        seg.startTime = currentTime
+        seg.endTime = currentTime + duration
+        
+        subSegments.push({
+            start: currentTime,
+            end: currentTime + duration,
+            text: seg.text,
+            furigana: seg.furigana || null,
+            tokens: seg.tokens || null,
+            translation: seg.translation || null
+        })
+        currentTime += duration
+
         tempFiles.push(result.filePath)
-        seg.status = 'done'; seg.statusText = 'Completed'
+        seg.status = 'done'; seg.statusText = 'Ready'
     }
 
-    const finalPath = `${outputFolder.value}/dialogue_${Date.now()}.mp3`
-    const mergedPath = await invoke('merge_audio_files', { inputPaths: tempFiles, outputPath: finalPath })
-    finalAudioUrl.value = convertFileSrc(mergedPath)
-    alert("🚀 Hội thoại của bác đã được lắp ghép hoàn chỉnh!")
+    const timestamp = Date.now()
+    const baseFileName = `dialogue_${timestamp}`
+    const finalAudioPath = `${outputFolder.value}/${baseFileName}.mp3`
+    const finalSubPath = `${outputFolder.value}/${baseFileName}.ass`
+
+    // 1. Nối âm thanh
+    await invoke('merge_audio_files', { inputPaths: tempFiles, outputPath: finalAudioPath })
+    
+    // 2. Tạo file Sub (.ass) chuẩn đét theo kịch bản
+    const videoFormat = selectedAspectRatio.value === '9:16' ? 'portrait' : 'landscape'
+    const assContent = await invoke('segments_to_ass_string', { 
+        segments: subSegments,
+        language: selectedLang.value,
+        position: 'bottom',
+        videoFormat: videoFormat
+    })
+    
+    // 3. Ghi file ASS thủ công
+    const encoder = new TextEncoder()
+    const data = encoder.encode(assContent)
+    
+    const tempAssPath = await invoke('save_temp_audio', { audioData: Array.from(data) })
+    await invoke('copy_external_file', { src: tempAssPath, dest: finalSubPath })
+
+    finalAudioUrl.value = convertFileSrc(finalAudioPath)
+    alert("🚀 Tuyệt vời! Đã xuất xong cả File Audio và File Sub (.ass) chuẩn kịch bản cho bác!")
   } catch (err) {
     alert("Lỗi sản xuất: " + err)
   } finally {
     isProducing.value = false; currentProcessingIdx.value = -1
   }
+}
+
+// Helper format thời gian
+const formatTimeShort = (sec) => {
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  const ms = Math.floor((sec % 1) * 100)
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`
 }
 
 const selectOutputFolder = async () => {

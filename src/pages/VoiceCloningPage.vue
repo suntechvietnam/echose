@@ -251,7 +251,7 @@ const testSaveFunction = async () => {
 
 // State
 const text = ref('')
-const selectedLang = ref('en')
+const selectedLang = ref('ja')
 const referencePaths = ref([])
 const outputUrl = ref(null)
 const outputPathRaw = ref(null)

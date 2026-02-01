@@ -112,7 +112,7 @@
               <div class="subtitle-grid-advanced">
                 <div class="sub-setting-item">
                   <label>Ngôn ngữ</label>
-                  <select v-model="subtitleLanguage" class="form-select-small" :disabled="subtitleMode === 'file'">
+                  <select v-model="subtitleLanguage" class="form-select-small">
                     <option value="vi">Tiếng Việt</option>
                     <option value="en">Tiếng Anh</option>
                     <option value="ja">Tiếng Nhật</option>
@@ -280,7 +280,7 @@ const subtitleMode = ref('none') // 'none', 'auto', 'file'
 const subtitlePath = ref('')
 const subtitleMarginV = ref(30)
 const subtitleFontSize = ref(58)
-const subtitleLanguage = ref('vi')
+const subtitleLanguage = ref('ja')
 const subtitleFontName = ref('Arial')
 
 const isCreating = ref(false)
